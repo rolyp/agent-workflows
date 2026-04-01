@@ -24,6 +24,8 @@ def main() -> None:
     if result.returncode != 0:
         print(result.stdout + result.stderr, file=sys.stderr)
         sys.exit(1)
+    else:
+        print(result.stdout.strip(), file=sys.stderr)
 
 
 if __name__ == "__main__":
