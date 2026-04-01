@@ -8,6 +8,7 @@ State is externalised to workflow/state.json and reported in the dashboard.
 """
 
 import glob
+import subprocess
 import json
 import re
 import sys
@@ -323,6 +324,7 @@ class StatusTracker:
                      + self._tex_files_containing(REVIEW_START)):
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
+        self._build()
         self._write_state(Phase.IDLE)
 
     # --- Bar operations (require active task) ---
@@ -352,6 +354,7 @@ class StatusTracker:
             text = text.replace(EDIT_START, REVIEW_START)
             text = text.replace(EDIT_END, REVIEW_END)
             Path(path).write_text(text)
+        self._build()
         task = self.read_state().get("task")
         self._write_state(Phase.AUTHOR_REVIEW, task)
 
@@ -362,8 +365,20 @@ class StatusTracker:
             text = text.replace(REVIEW_START, EDIT_START)
             text = text.replace(REVIEW_END, EDIT_END)
             Path(path).write_text(text)
+        self._build()
         task = self.read_state().get("task")
         self._write_state(Phase.EDIT, task)
+
+    def _build(self) -> None:
+        """Run the build script if it exists."""
+        build_script = self.root / "workflow" / "agent-workflows" / "paper-authoring" / "build.sh"
+        if build_script.exists():
+            result = subprocess.run(
+                ["bash", str(build_script)],
+                capture_output=True, text=True, cwd=self.root,
+            )
+            if result.returncode != 0:
+                print(result.stdout + result.stderr, file=__import__('sys').stderr)
 
     def _require_active_task(self) -> None:
         phase = self._read_phase()
@@ -378,6 +393,7 @@ class StatusTracker:
             raise ValueError(f"Passage not found in {file_path}")
         content = content.replace(passage, f"{start} {passage}{end}", 1)
         full_path.write_text(content)
+        self._build()
 
     def _remove_bars(self, file_path: str, start: str, end: str) -> None:
         full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
