@@ -17,6 +17,7 @@ from pathlib import Path
 
 class Phase(Enum):
     IDLE = "idle"                        # No active task
+    TRIAGE = "triage"                    # Reviewing structural/minor notes before editing cycle
     SELECTING = "selecting"              # Phase 1: choosing next task
     EDIT = "edit"                        # Phase 2: editing within select bars
     AUTHOR_REVIEW = "author-review"      # Phase 3: awaiting author approval
@@ -152,7 +153,41 @@ class StatusTracker:
             )
         self.dashboard_path.write_text(dashboard)
 
-    # --- Commands ---
+    # --- Triage commands ---
+
+    def begin_triage(self) -> None:
+        """Enter triage phase."""
+        self._write_state(Phase.TRIAGE)
+        self.assert_valid()
+
+    def reclassify(self, note_id: str, target: str) -> None:
+        """Move a note between structural.md and minor-issues.md.
+
+        target must be 'structural' or 'minor'.
+        """
+        assert target in ("structural", "minor"), f"Invalid target: {target}"
+        source_path = self.structural_path if target == "minor" else self._minor_issues_path()
+        target_path = self._minor_issues_path() if target == "minor" else self.structural_path
+        source_text = source_path.read_text()
+        # Extract the note block (### Note <id> through next ### or end)
+        pattern = rf"(### Note {re.escape(note_id)}\n.*?)(?=\n### |\Z)"
+        match = re.search(pattern, source_text, re.DOTALL)
+        if not match:
+            raise ValueError(f"Note '{note_id}' not found in {source_path.relative_to(self.root)}")
+        note_block = match.group(1).strip()
+        # Remove from source
+        source_text = re.sub(pattern + r"\n?", "", source_text, flags=re.DOTALL)
+        source_path.write_text(source_text)
+        # Append to target
+        target_text = target_path.read_text().rstrip()
+        target_path.write_text(target_text + "\n\n" + note_block + "\n")
+
+    def approve_triage(self) -> None:
+        """Exit triage, enter idle (ready for Phase 1–4 cycle)."""
+        self._write_state(Phase.IDLE)
+        self.assert_valid()
+
+    # --- Phase transition commands ---
 
     def begin_review(self) -> None:
         """Replace select bars with review bars in .tex files."""
@@ -188,6 +223,11 @@ class StatusTracker:
             return True, ""
         phase = self._read_phase()
         task = self.read_state().get("task") or "unknown"
+        if phase is Phase.TRIAGE:
+            return False, (
+                "Cannot edit .tex files during triage phase. "
+                "Run `status_tracker.py approve-triage` to enter editing cycle first."
+            )
         if phase is Phase.AUTHOR_REVIEW:
             return False, (
                 f"Cannot edit .tex files during author-review phase (task: {task}). "
@@ -198,6 +238,9 @@ class StatusTracker:
         return True, ""
 
     # --- Helpers ---
+
+    def _minor_issues_path(self) -> Path:
+        return self.root / "workflow" / "todo" / "minor-issues.md"
 
     def _read_dashboard(self) -> str:
         return self.dashboard_path.read_text()
@@ -251,6 +294,18 @@ def main() -> None:
         if task:
             summary += f" — {task}"
         print(summary)
+    elif command == "begin-triage":
+        tracker.begin_triage()
+        print("Entered triage phase")
+    elif command == "reclassify":
+        if len(sys.argv) < 4:
+            print("Usage: status_tracker.py reclassify <note-id> <structural|minor>", file=sys.stderr)
+            sys.exit(1)
+        tracker.reclassify(sys.argv[2], sys.argv[3])
+        print(f"Reclassified {sys.argv[2]} → {sys.argv[3]}")
+    elif command == "approve-triage":
+        tracker.approve_triage()
+        print("Triage complete; entering idle")
     elif command == "begin-review":
         tracker.begin_review()
         print("Markers: select → review")

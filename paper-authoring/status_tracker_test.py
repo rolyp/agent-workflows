@@ -298,5 +298,52 @@ class CheckEditTest(TestFixture):
         self.assertEqual(msg, "")
 
 
+class TriageTest(TestFixture):
+    def test_begin_triage_sets_phase(self):
+        tracker = self._make_tracker()
+        tracker.begin_triage()
+        state = tracker.read_state()
+        self.assertEqual(state["phase"], "triage")
+
+    def test_approve_triage_returns_to_idle(self):
+        tracker = self._make_tracker()
+        tracker.begin_triage()
+        tracker.approve_triage()
+        state = tracker.read_state()
+        self.assertEqual(state["phase"], "idle")
+
+    def test_tex_edit_blocked_during_triage(self):
+        tracker = self._make_tracker()
+        tracker.begin_triage()
+        allowed, msg = tracker.check_edit("sec/intro.tex")
+        self.assertFalse(allowed)
+        self.assertIn("approve-triage", msg)
+
+    def test_reclassify_structural_to_minor(self):
+        tracker = self._make_tracker()
+        # Add a structural note
+        (self.test_dir / "workflow" / "todo" / "structural.md").write_text(
+            "# Structural Review Notes\n\n"
+            "### Note structural-1\n\n"
+            "Some issue\n\n"
+            "**Diagnosis:** Problem here.\n\n"
+            "**Proposed action:** Fix it.\n"
+        )
+        (self.test_dir / "workflow" / "todo" / "minor-issues.md").write_text(
+            "# Minor Issues\n"
+        )
+        tracker.reclassify("structural-1", "minor")
+        structural = (self.test_dir / "workflow" / "todo" / "structural.md").read_text()
+        minor = (self.test_dir / "workflow" / "todo" / "minor-issues.md").read_text()
+        self.assertNotIn("structural-1", structural)
+        self.assertIn("structural-1", minor)
+        self.assertIn("Fix it.", minor)
+
+    def test_reclassify_nonexistent_note_raises(self):
+        tracker = self._make_tracker()
+        with self.assertRaises(ValueError):
+            tracker.reclassify("structural-99", "minor")
+
+
 if __name__ == "__main__":
     unittest.main()
