@@ -285,7 +285,7 @@ class StatusTracker:
         content = full_path.read_text()
         if passage not in content:
             raise ValueError(f"Passage not found in {file_path}")
-        content = content.replace(passage, f"{start}{passage}{end}", 1)
+        content = content.replace(passage, f"{start} {passage}{end}", 1)
         full_path.write_text(content)
 
     def _remove_bars(self, file_path: str, start: str, end: str) -> None:
