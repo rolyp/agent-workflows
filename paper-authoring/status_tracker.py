@@ -162,6 +162,7 @@ class StatusTracker:
         state = {"phase": phase.value, "task": task}
         self.state_path.write_text(json.dumps(state, indent=2) + "\n")
         self._update_dashboard_state(phase, task)
+        self.assert_valid()
 
     def _update_dashboard_state(self, phase: Phase, task: str | None) -> None:
         if not self.dashboard_path.exists():
@@ -184,7 +185,6 @@ class StatusTracker:
     def begin_triage(self) -> None:
         """Enter triage phase."""
         self._write_state(Phase.TRIAGE)
-        self.assert_valid()
 
     def reclassify(self, note_id: str, target: str) -> None:
         """Move a note between structural.md and minor-issues.md.
@@ -253,7 +253,6 @@ class StatusTracker:
     def approve_triage(self) -> None:
         """Exit triage, enter idle (ready for Phase 1–4 cycle)."""
         self._write_state(Phase.IDLE)
-        self.assert_valid()
 
     # --- Task selection ---
 
@@ -277,7 +276,6 @@ class StatusTracker:
         self.dashboard_path.write_text(dashboard)
         self._place_bars(file_path, passage, EDIT_START, EDIT_END)
         self._write_state(Phase.EDIT, note_id)
-        self.assert_valid()
 
     def select_ad_hoc(self, file_path: str, passage: str) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
@@ -289,7 +287,6 @@ class StatusTracker:
         self.dashboard_path.write_text(dashboard)
         self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
         self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC)
-        self.assert_valid()
 
     def complete_task(self) -> None:
         """Complete the current task; remove bars, update counts, return to idle."""
@@ -327,7 +324,6 @@ class StatusTracker:
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
         self._write_state(Phase.IDLE)
-        self.assert_valid()
 
     # --- Bar operations (require active task) ---
 
@@ -358,7 +354,6 @@ class StatusTracker:
             Path(path).write_text(text)
         task = self.read_state().get("task")
         self._write_state(Phase.AUTHOR_REVIEW, task)
-        self.assert_valid()
 
     def review_to_edit(self) -> None:
         """Swap all review bars to edit bars; transition to edit phase."""
@@ -369,7 +364,6 @@ class StatusTracker:
             Path(path).write_text(text)
         task = self.read_state().get("task")
         self._write_state(Phase.EDIT, task)
-        self.assert_valid()
 
     def _require_active_task(self) -> None:
         phase = self._read_phase()
