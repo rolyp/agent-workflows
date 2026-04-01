@@ -143,6 +143,51 @@ class ValidateTest(TestFixture):
         self.assertTrue(any("count mismatch" in e for e in errors))
 
 
+class StateTest(TestFixture):
+    def test_default_state_is_idle(self):
+        state = self.tracker.read_state()
+        self.assertEqual(state["phase"], "idle")
+        self.assertIsNone(state["task"])
+
+    def test_begin_review_sets_review_phase(self):
+        self._setup_project(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "\\selectstart text \\selectend\n"
+        )
+        self.tracker.begin_review()
+        state = self.tracker.read_state()
+        self.assertEqual(state["phase"], "review")
+
+    def test_return_to_edit_sets_edit_phase(self):
+        self._setup_project(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "\\reviewstart text \\reviewend\n"
+        )
+        self.tracker.return_to_edit()
+        state = self.tracker.read_state()
+        self.assertEqual(state["phase"], "edit")
+
+    def test_state_reported_in_dashboard(self):
+        self._setup_project()
+        self.tracker._write_state("edit", "Some task")
+        dashboard = self.tracker._read_dashboard()
+        self.assertIn("**State:** edit — Some task", dashboard)
+
+    def test_state_line_updated_not_duplicated(self):
+        self._setup_project()
+        self.tracker._write_state("edit", "Task A")
+        self.tracker._write_state("review", "Task A")
+        dashboard = self.tracker._read_dashboard()
+        self.assertEqual(dashboard.count("**State:**"), 1)
+        self.assertIn("**State:** review — Task A", dashboard)
+
+
 class BeginReviewTest(TestFixture):
     def test_swaps_select_to_review(self):
         self._setup_project(_make_dashboard(
@@ -173,6 +218,33 @@ class ReturnToEditTest(TestFixture):
         self.assertIn("\\selectend", result)
         self.assertNotIn("\\reviewstart", result)
         self.assertNotIn("\\reviewend", result)
+
+
+class CheckEditTest(TestFixture):
+    def test_non_tex_always_allowed(self):
+        allowed, msg = self.tracker.check_edit("workflow/dashboard.md")
+        self.assertTrue(allowed)
+        self.assertEqual(msg, "")
+
+    def test_tex_edit_blocked_during_review(self):
+        self._setup_project()
+        self.tracker._write_state("review", "Some task")
+        allowed, msg = self.tracker.check_edit("sec/intro.tex")
+        self.assertFalse(allowed)
+        self.assertIn("return-to-edit", msg)
+
+    def test_tex_edit_warned_during_idle(self):
+        self._setup_project()
+        allowed, msg = self.tracker.check_edit("sec/intro.tex")
+        self.assertTrue(allowed)
+        self.assertIn("ad hoc", msg)
+
+    def test_tex_edit_allowed_during_edit_phase(self):
+        self._setup_project()
+        self.tracker._write_state("edit", "Some task")
+        allowed, msg = self.tracker.check_edit("sec/intro.tex")
+        self.assertTrue(allowed)
+        self.assertEqual(msg, "")
 
 
 if __name__ == "__main__":
