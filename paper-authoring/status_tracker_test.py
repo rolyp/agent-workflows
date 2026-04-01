@@ -387,6 +387,20 @@ class AddTaskTest(TestFixture):
         tracker.add_task("structural-3", "New task", "structural")
         tracker.assert_valid()  # should not raise
 
+    def test_duplicate_rejected(self):
+        tracker = self._make_tracker()
+        tracker.add_task("structural-3", "New task", "structural")
+        with self.assertRaises(ValueError) as ctx:
+            tracker.add_task("structural-3", "Same task again", "structural")
+        self.assertIn("already exists", str(ctx.exception))
+
+    def test_blank_line_between_sections(self):
+        tracker = self._make_tracker()
+        tracker.add_task("minor-1", "Fix typo", "minor")
+        dashboard = tracker._read_dashboard()
+        # There should be a blank line before ### Structural
+        self.assertIn("\n\n### Structural", dashboard)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -189,11 +189,16 @@ class StatusTracker:
         note_id is used to generate the link to the notes file.
         """
         assert kind in ("structural", "minor"), f"Invalid kind: {kind}"
+        dashboard = self._read_dashboard()
+
+        # Reject duplicates
+        anchor = f"#note-{note_id})"
+        if anchor in dashboard:
+            raise ValueError(f"Task '{note_id}' already exists in dashboard")
+
         notes_file = "structural.md" if kind == "structural" else "minor-issues.md"
         link = f"[note](todo/{notes_file}#note-{note_id})"
         entry = f"- {description} ({link})"
-
-        dashboard = self._read_dashboard()
 
         # Insert under the appropriate ### heading
         section = kind.capitalize()
@@ -204,9 +209,9 @@ class StatusTracker:
 
         existing = match.group(2).strip()
         if existing == "(none)":
-            new_items = entry + "\n"
+            new_items = entry + "\n\n"
         else:
-            new_items = existing + "\n" + entry + "\n"
+            new_items = existing + "\n" + entry + "\n\n"
 
         dashboard = dashboard[:match.start(2)] + new_items + dashboard[match.end(2):]
 
