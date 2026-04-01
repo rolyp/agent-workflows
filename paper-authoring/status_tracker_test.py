@@ -263,11 +263,17 @@ class ReviewToEditTest(TestFixture):
 
 
 class CheckEditTest(TestFixture):
-    def test_non_tex_always_allowed(self):
+    def test_non_tex_non_protected_allowed(self):
         tracker = self._make_tracker()
-        allowed, msg = tracker.check_edit("workflow/dashboard.md")
+        allowed, msg = tracker.check_edit("comp-sci.bib")
         self.assertTrue(allowed)
         self.assertEqual(msg, "")
+
+    def test_dashboard_edit_blocked(self):
+        tracker = self._make_tracker()
+        allowed, msg = tracker.check_edit("workflow/dashboard.md")
+        self.assertFalse(allowed)
+        self.assertIn("StatusTracker", msg)
 
     def test_tex_edit_blocked_in_idle(self):
         tracker = self._make_tracker()

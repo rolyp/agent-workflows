@@ -25,6 +25,9 @@ REVIEW_END = "\\reviewend"
 # Change markup commands
 CHANGE_MARKUP = ("\\added", "\\deleted", "\\replaced")
 
+# Files managed exclusively by StatusTracker (block direct Edit)
+PROTECTED_FILES = ("workflow/dashboard.md", "workflow/todo/completed.md", "workflow/state.json")
+
 # CLI command names
 CMD_STARTUP = "startup"
 CMD_BEGIN_TRIAGE = "begin-triage"
@@ -38,6 +41,8 @@ CMD_OPEN_REVIEW = "open-review"
 CMD_CLOSE_REVIEW = "close-review"
 CMD_EDIT_TO_REVIEW = "edit-to-review"
 CMD_REVIEW_TO_EDIT = "review-to-edit"
+CMD_CREATE_PLAN = "create-plan"
+CMD_APPROVE_PLAN = "approve-plan"
 CMD_CHECK_EDIT = "check-edit"
 
 
@@ -46,6 +51,7 @@ class Phase(Enum):
     TRIAGE = "triage"                    # Reviewing structural/minor notes before editing cycle
     SELECTING = "selecting"              # Phase 1: choosing next task
     EDIT = "edit"                        # Phase 2: editing within edit bars
+    PLANNING = "planning"                  # Substate of edit: working on a plan
     AUTHOR_REVIEW = "author-review"      # Phase 3: awaiting author approval
     CLOSEOUT = "closeout"                # Phase 4: structural close-out
 
@@ -289,6 +295,48 @@ class StatusTracker:
         self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
         self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC)
 
+    # --- Planning ---
+
+    def create_plan(self, plan_name: str) -> Path:
+        """Create a plan file and transition to planning phase.
+
+        Returns the path to the created plan file.
+        """
+        phase = self._read_phase()
+        if phase is not Phase.EDIT:
+            raise ValueError(f"Can only create plans during edit phase (current: {phase.value})")
+        plans_dir = self.root / "workflow" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plans_dir / f"{plan_name}.md"
+        if plan_path.exists():
+            raise ValueError(f"Plan already exists: {plan_path.relative_to(self.root)}")
+        state = self.read_state()
+        task = state.get("task")
+        plan_path.write_text(
+            f"# Plan: {plan_name}\n\n"
+            f"Task: [{task}](../todo/structural.md#note-{task})\n\n"
+            f"## Problem\n\n## Proposed approach\n\n## Open questions\n"
+        )
+        # Link from dashboard
+        dashboard = self._read_dashboard()
+        in_progress_match = re.search(r"^(- 🔵 .*)$", dashboard, re.MULTILINE)
+        if in_progress_match:
+            old_line = in_progress_match.group(1)
+            plan_link = f" · [plan](plans/{plan_name}.md)"
+            if "plan" not in old_line:
+                dashboard = dashboard.replace(old_line, old_line + plan_link)
+                self.dashboard_path.write_text(dashboard)
+        self._write_state(Phase.PLANNING, task)
+        return plan_path
+
+    def approve_plan(self) -> None:
+        """Approve the plan and return to edit phase."""
+        phase = self._read_phase()
+        if phase is not Phase.PLANNING:
+            raise ValueError(f"Can only approve plans during planning phase (current: {phase.value})")
+        state = self.read_state()
+        self._write_state(Phase.EDIT, state.get("task"))
+
     def complete_task(self) -> None:
         """Complete the current task; remove bars, update counts, return to idle."""
         state = self.read_state()
@@ -411,10 +459,40 @@ class StatusTracker:
         Returns (allowed, message). If not allowed, message explains
         what state transition is needed.
         """
+        phase = self._read_phase()
+        state = self.read_state()
+        task = state.get("task") or "unknown"
+
+        # Resolve relative path for comparison
+        rel_path = file_path
+        if Path(file_path).is_absolute():
+            try:
+                rel_path = str(Path(file_path).relative_to(self.root))
+            except ValueError:
+                pass
+
+        # Protected files: never editable directly
+        for protected in PROTECTED_FILES:
+            if rel_path == protected or rel_path.endswith(protected):
+                return False, (
+                    f"Cannot edit {protected} directly. "
+                    f"Use StatusTracker commands to modify workflow state."
+                )
+
+        # .md files in workflow/plans: only during planning, only the active plan
+        if "workflow/plans/" in rel_path and rel_path.endswith(".md"):
+            if phase is not Phase.PLANNING:
+                return False, (
+                    f"Cannot edit plan files outside planning phase. "
+                    f"Use `status_tracker.py {CMD_CREATE_PLAN}` first."
+                )
+            return True, ""
+
+        # Non-.tex files: allow (e.g. .bib, structural.md, minor-issues.md)
         if not file_path.endswith(".tex"):
             return True, ""
-        phase = self._read_phase()
-        task = self.read_state().get("task") or "unknown"
+
+        # --- .tex-specific checks below ---
 
         # Phase-based blocks
         if phase is Phase.IDLE:
@@ -426,6 +504,11 @@ class StatusTracker:
             return False, (
                 "Cannot edit .tex files during triage phase. "
                 f"Run `status_tracker.py {CMD_APPROVE_TRIAGE}` to enter editing cycle first."
+            )
+        if phase is Phase.PLANNING:
+            return False, (
+                "Cannot edit .tex files during planning phase. "
+                f"Run `status_tracker.py {CMD_APPROVE_PLAN}` to return to edit phase first."
             )
 
         # Change markup required in all .tex edits
@@ -466,7 +549,30 @@ class StatusTracker:
         """Check whether a Write to file_path is allowed.
 
         Write is only allowed if the file does not already exist.
+        Plan files can only be created by StatusTracker.
         """
+        rel_path = file_path
+        if Path(file_path).is_absolute():
+            try:
+                rel_path = str(Path(file_path).relative_to(self.root))
+            except ValueError:
+                pass
+
+        # Block writing to protected files
+        for protected in PROTECTED_FILES:
+            if rel_path == protected or rel_path.endswith(protected):
+                return False, (
+                    f"Cannot write {protected} directly. "
+                    f"Use StatusTracker commands."
+                )
+
+        # Block creating plan files directly
+        if "workflow/plans/" in rel_path and rel_path.endswith(".md"):
+            return False, (
+                f"Cannot create plan files directly. "
+                f"Use `status_tracker.py {CMD_CREATE_PLAN}` instead."
+            )
+
         full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
         if full_path.exists():
             return False, (
@@ -587,6 +693,15 @@ def main() -> None:
             sys.exit(1)
         tracker.select_ad_hoc(sys.argv[2], sys.argv[3])
         print(f"Ad hoc edit started in {sys.argv[2]}")
+    elif command == CMD_CREATE_PLAN:
+        if len(sys.argv) < 3:
+            print(f"Usage: status_tracker.py {CMD_CREATE_PLAN} <plan-name>", file=sys.stderr)
+            sys.exit(1)
+        plan_path = tracker.create_plan(sys.argv[2])
+        print(f"Plan created: {plan_path}")
+    elif command == CMD_APPROVE_PLAN:
+        tracker.approve_plan()
+        print("Plan approved; returning to edit phase")
     elif command == CMD_COMPLETE_TASK:
         tracker.complete_task()
         print("Task completed")
