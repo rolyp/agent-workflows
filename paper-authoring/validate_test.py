@@ -2,34 +2,63 @@
 """Tests for validate.py."""
 
 import os
+import re
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 
 from validate import validate
 
+TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.md"
 
-DASHBOARD_TEMPLATE = """\
-# Task Dashboard
 
-- [Completed minor issues](todo/completed.md#minor) (0 of 0)
-- [Completed structural tasks](todo/completed.md#structural) (0 of 2)
+def _make_dashboard(
+    structural_tasks: list[str] | None = None,
+    minor_tasks: list[str] | None = None,
+    in_progress: list[str] | None = None,
+) -> str:
+    """Build a dashboard from the template, injecting tasks."""
+    dashboard = TEMPLATE_PATH.read_text()
+    structural = structural_tasks or []
+    minor = minor_tasks or []
+    ip = in_progress or []
 
-## In progress
+    # Update counts
+    dashboard = dashboard.replace(
+        f"minor issues](todo/completed.md#minor) (0 of 0)",
+        f"minor issues](todo/completed.md#minor) (0 of {len(minor)})",
+    )
+    dashboard = dashboard.replace(
+        f"structural tasks](todo/completed.md#structural) (0 of 0)",
+        f"structural tasks](todo/completed.md#structural) (0 of {len(structural)})",
+    )
 
-(none)
+    # Inject in-progress
+    if ip:
+        dashboard = dashboard.replace(
+            "## In progress\n\n(none)",
+            "## In progress\n\n" + "\n".join(ip),
+        )
 
-## To do
+    # Inject structural to-do items
+    if structural:
+        dashboard = re.sub(
+            r"(### Structural\n\n)(.*?)$",
+            "\\1" + "\n".join(f"- {t}" for t in structural) + "\n",
+            dashboard,
+            flags=re.DOTALL,
+        )
 
-### Minor
+    # Inject minor to-do items
+    if minor:
+        dashboard = re.sub(
+            r"(### Minor\n\n)\(none\)",
+            "\\1" + "\n".join(f"- {t}" for t in minor),
+            dashboard,
+        )
 
-(none)
-
-### Structural
-
-- Task one
-- Task two
-"""
+    return dashboard
 
 
 class ValidateTest(unittest.TestCase):
@@ -42,11 +71,11 @@ class ValidateTest(unittest.TestCase):
         os.chdir(self.orig_dir)
         shutil.rmtree(self.test_dir)
 
-    def _setup_project(self, dashboard=DASHBOARD_TEMPLATE):
+    def _setup_project(self, dashboard: str | None = None):
         os.makedirs("workflow/todo", exist_ok=True)
         os.makedirs("sec", exist_ok=True)
         with open("workflow/dashboard.md", "w") as f:
-            f.write(dashboard)
+            f.write(dashboard or _make_dashboard(structural_tasks=["Task one", "Task two"]))
         with open("workflow/todo/structural.md", "w") as f:
             f.write("# Structural Review Notes\n")
         with open("workflow/todo/completed.md", "w") as f:
@@ -77,23 +106,26 @@ class ValidateTest(unittest.TestCase):
         self.assertTrue(any("Orphaned \\reviewstart" in e for e in errors))
 
     def test_in_progress_without_markers(self):
-        dashboard = DASHBOARD_TEMPLATE.replace("(none)", "🔵 Active task", 1)
-        self._setup_project(dashboard)
+        self._setup_project(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
         errors = validate()
         self.assertTrue(any("no select/review markers" in e for e in errors))
 
     def test_multiple_in_progress(self):
-        dashboard = DASHBOARD_TEMPLATE.replace(
-            "(none)\n\n## To do",
-            "🔵 Task A\n🔵 Task B\n\n## To do",
-        )
-        self._setup_project(dashboard)
+        self._setup_project(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Task A", "🔵 Task B"],
+        ))
         errors = validate()
         self.assertTrue(any("Multiple in-progress" in e for e in errors))
 
     def test_coexisting_markers(self):
-        dashboard = DASHBOARD_TEMPLATE.replace("(none)", "🔵 Active task", 1)
-        self._setup_project(dashboard)
+        self._setup_project(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
         with open("sec/a.tex", "w") as f:
             f.write("\\selectstart text \\selectend\n")
         with open("sec/b.tex", "w") as f:
@@ -102,7 +134,8 @@ class ValidateTest(unittest.TestCase):
         self.assertTrue(any("should not coexist" in e for e in errors))
 
     def test_count_mismatch(self):
-        dashboard = DASHBOARD_TEMPLATE.replace("0 of 2", "0 of 5")
+        dashboard = _make_dashboard(structural_tasks=["Task one", "Task two"])
+        dashboard = dashboard.replace("0 of 2", "0 of 5")
         self._setup_project(dashboard)
         errors = validate()
         self.assertTrue(any("count mismatch" in e for e in errors))
