@@ -14,11 +14,12 @@ def main() -> None:
     inputs = tool_input.get("tool_input", {})
     file_path = inputs.get("file_path", "")
     old_string = inputs.get("old_string")
+    new_string = inputs.get("new_string")
     if not file_path:
         return
 
     tracker = StatusTracker(Path.cwd())
-    allowed, message = tracker.check_edit(file_path, old_string)
+    allowed, message = tracker.check_edit(file_path, old_string, new_string)
 
     if not allowed:
         print(message, file=sys.stderr)

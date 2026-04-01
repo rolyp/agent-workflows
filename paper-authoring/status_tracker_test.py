@@ -265,7 +265,58 @@ class CheckEditTest(TestFixture):
         self.assertTrue(allowed)
         self.assertEqual(msg, "")
 
-    def test_tex_edit_blocked_during_review(self):
+    def test_tex_edit_blocked_without_change_markup(self):
+        tracker = self._make_tracker()
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "\\reviewstart old text \\reviewend\n"
+        )
+        allowed, msg = tracker.check_edit("sec/test.tex", "old text", "new text")
+        self.assertFalse(allowed)
+        self.assertIn("change markup", msg)
+
+    def test_tex_edit_blocked_outside_any_bars(self):
+        tracker = self._make_tracker()
+        (self.test_dir / "sec" / "test.tex").write_text("bare text\n")
+        allowed, msg = tracker.check_edit("sec/test.tex", "bare text", "\\deleted{bare text}")
+        self.assertFalse(allowed)
+        self.assertIn("outside change bars", msg)
+
+    def test_tex_edit_allowed_within_review_bars_idle(self):
+        """Ad hoc edit: review bars + change markup, idle phase."""
+        tracker = self._make_tracker()
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "before \\reviewstart old text \\reviewend after\n"
+        )
+        allowed, msg = tracker.check_edit("sec/test.tex", "old text", "\\deleted{old text}")
+        self.assertTrue(allowed)
+
+    def test_tex_edit_allowed_within_select_bars_edit_phase(self):
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "before \\selectstart editable text \\selectend after\n"
+        )
+        tracker._write_state(Phase.EDIT, "Some task")
+        allowed, msg = tracker.check_edit("sec/test.tex", "editable text", "\\replaced{new}{editable text}")
+        self.assertTrue(allowed)
+
+    def test_tex_edit_blocked_in_review_bars_during_edit_phase(self):
+        """During edit phase, must be in select bars, not review bars."""
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "\\reviewstart text \\reviewend\n"
+        )
+        tracker._write_state(Phase.EDIT, "Some task")
+        allowed, msg = tracker.check_edit("sec/test.tex", "text", "\\deleted{text}")
+        self.assertFalse(allowed)
+        self.assertIn("review bars but phase is 'edit'", msg)
+
+    def test_tex_edit_blocked_during_author_review(self):
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
@@ -274,54 +325,16 @@ class CheckEditTest(TestFixture):
             "\\reviewstart text \\reviewend\n"
         )
         tracker._write_state(Phase.AUTHOR_REVIEW, "Some task")
-        allowed, msg = tracker.check_edit("sec/intro.tex")
+        allowed, msg = tracker.check_edit("sec/test.tex", "text", "\\deleted{text}")
         self.assertFalse(allowed)
         self.assertIn("return-to-edit", msg)
 
-    def test_tex_edit_warned_during_idle(self):
+    def test_tex_edit_blocked_during_triage(self):
         tracker = self._make_tracker()
-        allowed, msg = tracker.check_edit("sec/intro.tex")
-        self.assertTrue(allowed)
-        self.assertIn("ad hoc", msg)
-
-    def test_tex_edit_allowed_within_select_bars(self):
-        tracker = self._make_tracker(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["🔵 Active task"],
-        ))
-        (self.test_dir / "sec" / "test.tex").write_text(
-            "before \\selectstart editable text \\selectend after\n"
-        )
-        tracker._write_state(Phase.EDIT, "Some task")
-        allowed, msg = tracker.check_edit("sec/test.tex", "editable text")
-        self.assertTrue(allowed)
-        self.assertEqual(msg, "")
-
-    def test_tex_edit_blocked_outside_select_bars(self):
-        tracker = self._make_tracker(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["🔵 Active task"],
-        ))
-        (self.test_dir / "sec" / "test.tex").write_text(
-            "before \\selectstart editable text \\selectend after\n"
-        )
-        tracker._write_state(Phase.EDIT, "Some task")
-        allowed, msg = tracker.check_edit("sec/test.tex", "before")
+        tracker.begin_triage()
+        allowed, msg = tracker.check_edit("sec/test.tex", None, "\\added{text}")
         self.assertFalse(allowed)
-        self.assertIn("outside select bars", msg)
-
-    def test_tex_edit_without_old_string_allowed(self):
-        """When old_string is not provided, skip the select bars check."""
-        tracker = self._make_tracker(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["🔵 Active task"],
-        ))
-        (self.test_dir / "sec" / "test.tex").write_text(
-            "\\selectstart text \\selectend\n"
-        )
-        tracker._write_state(Phase.EDIT, "Some task")
-        allowed, msg = tracker.check_edit("sec/test.tex")
-        self.assertTrue(allowed)
+        self.assertIn("approve-triage", msg)
 
 
 class TriageTest(TestFixture):
@@ -337,13 +350,6 @@ class TriageTest(TestFixture):
         tracker.approve_triage()
         state = tracker.read_state()
         self.assertEqual(state["phase"], "idle")
-
-    def test_tex_edit_blocked_during_triage(self):
-        tracker = self._make_tracker()
-        tracker.begin_triage()
-        allowed, msg = tracker.check_edit("sec/intro.tex")
-        self.assertFalse(allowed)
-        self.assertIn("approve-triage", msg)
 
     def test_reclassify_structural_to_minor(self):
         tracker = self._make_tracker()

@@ -21,6 +21,9 @@ SELECT_END = "\\selectend"
 REVIEW_START = "\\reviewstart"
 REVIEW_END = "\\reviewend"
 
+# Change markup commands
+CHANGE_MARKUP = ("\\added", "\\deleted", "\\replaced")
+
 
 class Phase(Enum):
     IDLE = "idle"                        # No active task
@@ -262,7 +265,8 @@ class StatusTracker:
 
     # --- PreToolUse gate ---
 
-    def check_edit(self, file_path: str, old_string: str | None = None) -> tuple[bool, str]:
+    def check_edit(self, file_path: str, old_string: str | None = None,
+                   new_string: str | None = None) -> tuple[bool, str]:
         """Check whether an edit to file_path is allowed.
 
         Returns (allowed, message). If not allowed, message explains
@@ -272,27 +276,47 @@ class StatusTracker:
             return True, ""
         phase = self._read_phase()
         task = self.read_state().get("task") or "unknown"
+
+        # Phase-based blocks
         if phase is Phase.TRIAGE:
             return False, (
                 "Cannot edit .tex files during triage phase. "
                 "Run `status_tracker.py approve-triage` to enter editing cycle first."
             )
-        if phase is Phase.AUTHOR_REVIEW:
+
+        # Change markup required in all .tex edits
+        if new_string is not None and not any(cmd in new_string for cmd in CHANGE_MARKUP):
             return False, (
-                f"Cannot edit .tex files during author-review phase (task: {task}). "
-                f"Run `status_tracker.py return-to-edit` first."
+                "All .tex edits must use change markup "
+                "(\\added, \\deleted, or \\replaced)."
             )
-        if phase is Phase.IDLE:
-            return True, "Note: no active task. Is this an ad hoc edit?"
-        if phase is Phase.EDIT and old_string is not None:
+
+        # Edits must be within bars (select or review)
+        if old_string is not None:
             full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
             if full_path.exists():
                 content = full_path.read_text()
-                if not self._text_within_select_bars(content, old_string):
+                in_select = self._text_within_bars(content, old_string, SELECT_START, SELECT_END)
+                in_review = self._text_within_bars(content, old_string, REVIEW_START, REVIEW_END)
+                if not in_select and not in_review:
                     return False, (
-                        f"Edit target is outside select bars in {file_path}. "
+                        f"Edit target is outside change bars in {file_path}. "
+                        f"Place {REVIEW_START}/{REVIEW_END} (ad hoc) or "
+                        f"{SELECT_START}/{SELECT_END} (task) around the passage first."
+                    )
+                # During edit phase, must be in select bars specifically
+                if phase is Phase.EDIT and not in_select:
+                    return False, (
+                        f"Edit target is in review bars but phase is 'edit'. "
                         f"Edits during 'edit' phase must be within {SELECT_START}/{SELECT_END}."
                     )
+                # During author-review, no edits allowed
+                if phase is Phase.AUTHOR_REVIEW:
+                    return False, (
+                        f"Cannot edit .tex files during author-review phase (task: {task}). "
+                        f"Run `status_tracker.py return-to-edit` first."
+                    )
+
         return True, ""
 
     def check_write(self, file_path: str) -> tuple[bool, str]:
@@ -310,10 +334,11 @@ class StatusTracker:
 
     # --- Helpers ---
 
-    def _text_within_select_bars(self, content: str, text: str) -> bool:
-        """Check if text appears between select bar markers in content."""
+    def _text_within_bars(self, content: str, text: str,
+                          start_marker: str, end_marker: str) -> bool:
+        """Check if text appears between the given markers in content."""
         regions = re.findall(
-            rf"{re.escape(SELECT_START)}(.*?){re.escape(SELECT_END)}", content, re.DOTALL
+            rf"{re.escape(start_marker)}(.*?){re.escape(end_marker)}", content, re.DOTALL
         )
         return any(text in region for region in regions)
 
