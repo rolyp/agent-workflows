@@ -24,6 +24,21 @@ REVIEW_END = "\\reviewend"
 # Change markup commands
 CHANGE_MARKUP = ("\\added", "\\deleted", "\\replaced")
 
+# CLI command names
+CMD_STARTUP = "startup"
+CMD_BEGIN_TRIAGE = "begin-triage"
+CMD_RECLASSIFY = "reclassify"
+CMD_ADD_TASK = "add-task"
+CMD_APPROVE_TRIAGE = "approve-triage"
+CMD_SELECT_TASK = "select-task"
+CMD_SELECT_AD_HOC = "select-ad-hoc-edit"
+CMD_COMPLETE_TASK = "complete-task"
+CMD_OPEN_REVIEW = "open-review"
+CMD_CLOSE_REVIEW = "close-review"
+CMD_EDIT_TO_REVIEW = "edit-to-review"
+CMD_REVIEW_TO_EDIT = "review-to-edit"
+CMD_CHECK_EDIT = "check-edit"
+
 
 class Phase(Enum):
     IDLE = "idle"                        # No active task
@@ -342,7 +357,7 @@ class StatusTracker:
     def _require_active_task(self) -> None:
         phase = self._read_phase()
         if phase is Phase.IDLE:
-            raise ValueError("No active task. Use select-task or select-ad-hoc-edit first.")
+            raise ValueError(f"No active task. Use {CMD_SELECT_TASK} or {CMD_SELECT_AD_HOC} first.")
 
     def _place_bars(self, file_path: str, passage: str,
                     start: str, end: str) -> None:
@@ -377,13 +392,13 @@ class StatusTracker:
         # Phase-based blocks
         if phase is Phase.IDLE:
             return False, (
-                "No active task. Use `status_tracker.py select-task` or "
-                "`status_tracker.py select-ad-hoc-edit` first."
+                f"No active task. Use `status_tracker.py {CMD_SELECT_TASK}` or "
+                f"`status_tracker.py {CMD_SELECT_AD_HOC}` first."
             )
         if phase is Phase.TRIAGE:
             return False, (
                 "Cannot edit .tex files during triage phase. "
-                "Run `status_tracker.py approve-triage` to enter editing cycle first."
+                f"Run `status_tracker.py {CMD_APPROVE_TRIAGE}` to enter editing cycle first."
             )
 
         # Change markup required in all .tex edits
@@ -415,7 +430,7 @@ class StatusTracker:
                 if phase is Phase.AUTHOR_REVIEW:
                     return False, (
                         f"Cannot edit .tex files during author-review phase (task: {task}). "
-                        f"Run `status_tracker.py review-to-edit` first."
+                        f"Run `status_tracker.py {CMD_REVIEW_TO_EDIT}` first."
                     )
 
         return True, ""
@@ -489,7 +504,7 @@ class StatusTracker:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        command = "startup"
+        command = CMD_STARTUP
     else:
         command = sys.argv[1]
 
@@ -502,12 +517,12 @@ def main() -> None:
         print(f"Workflow validation: {len(e.errors)} issue(s)")
         for err in e.errors:
             print(f"  - {err}")
-        if command == "startup":
+        if command == CMD_STARTUP:
             sys.exit(0)  # report to Claude's context, don't block
         else:
             sys.exit(1)
 
-    if command == "startup":
+    if command == CMD_STARTUP:
         state = tracker.read_state()
         phase = state["phase"]
         task = state.get("task")
@@ -515,60 +530,60 @@ def main() -> None:
         if task:
             summary += f" — {task}"
         print(summary)
-    elif command == "begin-triage":
+    elif command == CMD_BEGIN_TRIAGE:
         tracker.begin_triage()
         print("Entered triage phase")
-    elif command == "reclassify":
+    elif command == CMD_RECLASSIFY:
         if len(sys.argv) < 4:
-            print("Usage: status_tracker.py reclassify <note-id> <structural|minor>", file=sys.stderr)
+            print(f"Usage: status_tracker.py {CMD_RECLASSIFY} <note-id> <structural|minor>", file=sys.stderr)
             sys.exit(1)
         tracker.reclassify(sys.argv[2], sys.argv[3])
         print(f"Reclassified {sys.argv[2]} → {sys.argv[3]}")
-    elif command == "add-task":
+    elif command == CMD_ADD_TASK:
         if len(sys.argv) < 5:
-            print("Usage: status_tracker.py add-task <note-id> <description> <structural|minor>", file=sys.stderr)
+            print(f"Usage: status_tracker.py {CMD_ADD_TASK} <note-id> <description> <structural|minor>", file=sys.stderr)
             sys.exit(1)
         tracker.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
         print(f"Added {sys.argv[4]} task: {sys.argv[3]}")
-    elif command == "approve-triage":
+    elif command == CMD_APPROVE_TRIAGE:
         tracker.approve_triage()
         print("Triage complete; entering idle")
-    elif command == "select-task":
+    elif command == CMD_SELECT_TASK:
         if len(sys.argv) < 5:
-            print("Usage: status_tracker.py select-task <note-id> <file_path> <passage>", file=sys.stderr)
+            print(f"Usage: status_tracker.py {CMD_SELECT_TASK} <note-id> <file_path> <passage>", file=sys.stderr)
             sys.exit(1)
         tracker.select_task(sys.argv[2], sys.argv[3], sys.argv[4])
         print(f"Selected task: {sys.argv[2]}")
-    elif command == "select-ad-hoc-edit":
+    elif command == CMD_SELECT_AD_HOC:
         if len(sys.argv) < 4:
-            print("Usage: status_tracker.py select-ad-hoc-edit <file_path> <passage>", file=sys.stderr)
+            print(f"Usage: status_tracker.py {CMD_SELECT_AD_HOC} <file_path> <passage>", file=sys.stderr)
             sys.exit(1)
         tracker.select_ad_hoc(sys.argv[2], sys.argv[3])
         print(f"Ad hoc edit started in {sys.argv[2]}")
-    elif command == "complete-task":
+    elif command == CMD_COMPLETE_TASK:
         tracker.complete_task()
         print("Task completed")
-    elif command == "open-review":
+    elif command == CMD_OPEN_REVIEW:
         if len(sys.argv) < 4:
-            print("Usage: status_tracker.py open-review <file_path> <passage>", file=sys.stderr)
+            print(f"Usage: status_tracker.py {CMD_OPEN_REVIEW} <file_path> <passage>", file=sys.stderr)
             sys.exit(1)
         tracker.open_review(sys.argv[2], sys.argv[3])
         print(f"Review bars placed in {sys.argv[2]}")
-    elif command == "close-review":
+    elif command == CMD_CLOSE_REVIEW:
         if len(sys.argv) < 3:
-            print("Usage: status_tracker.py close-review <file_path>", file=sys.stderr)
+            print(f"Usage: status_tracker.py {CMD_CLOSE_REVIEW} <file_path>", file=sys.stderr)
             sys.exit(1)
         tracker.close_review(sys.argv[2])
         print(f"Review bars removed from {sys.argv[2]}")
-    elif command == "edit-to-review":
+    elif command == CMD_EDIT_TO_REVIEW:
         tracker.edit_to_review()
         print("Bars: edit → review")
-    elif command == "review-to-edit":
+    elif command == CMD_REVIEW_TO_EDIT:
         tracker.review_to_edit()
         print("Bars: review → edit")
-    elif command == "check-edit":
+    elif command == CMD_CHECK_EDIT:
         if len(sys.argv) < 3:
-            print("Usage: status_tracker.py check-edit <file_path>", file=sys.stderr)
+            print(f"Usage: status_tracker.py {CMD_CHECK_EDIT} <file_path>", file=sys.stderr)
             sys.exit(1)
         allowed, message = tracker.check_edit(sys.argv[2])
         if not allowed:
