@@ -472,3 +472,31 @@ class CheckWriteTest(TestFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompleteTaskTest(TestFixture):
+    def _make_tracker_with_task(self):
+        """Create a tracker with a properly linked task, select it."""
+        tracker = self._make_tracker()
+        # Add a task with proper note link
+        tracker.add_task("test-1", "Fix something", "structural")
+        (self.test_dir / "sec" / "test.tex").write_text("some passage\n")
+        tracker.select_task("test-1", "sec/test.tex", "some passage")
+        return tracker
+
+    def test_complete_updates_done_count(self):
+        tracker = self._make_tracker_with_task()
+        tracker.complete_task()
+        dashboard = tracker._read_dashboard()
+        # structural: was "0 of 3" (2 original + 1 added), now 1 done
+        self.assertIn("1 of 3", dashboard)
+
+    def test_complete_validates(self):
+        """complete_task should call assert_valid; a broken state should raise."""
+        tracker = self._make_tracker_with_task()
+        # Corrupt the count before completing
+        dashboard = tracker._read_dashboard()
+        dashboard = dashboard.replace("0 of 3", "0 of 99")
+        tracker.dashboard_path.write_text(dashboard)
+        with self.assertRaises(ValidationError):
+            tracker.complete_task()

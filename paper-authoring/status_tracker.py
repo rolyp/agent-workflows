@@ -292,10 +292,26 @@ class StatusTracker:
         self.assert_valid()
 
     def complete_task(self) -> None:
-        """Complete the current task; remove bars and In Progress entry."""
+        """Complete the current task; remove bars, update counts, return to idle."""
         state = self.read_state()
         task = state.get("task")
         dashboard = self._read_dashboard()
+        # Determine kind from the in-progress line
+        in_progress_match = re.search(r"^- 🔵 .*$", dashboard, re.MULTILINE)
+        if in_progress_match:
+            line = in_progress_match.group(0)
+            if "minor-issues.md" in line:
+                kind = "minor"
+            else:
+                kind = "structural"
+            # Increment done count
+            count_pattern = rf"(Completed {kind}.*?\()(\d+)( of \d+\))"
+            count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
+            if count_match:
+                old_done = int(count_match.group(2))
+                dashboard = (dashboard[:count_match.start(2)]
+                           + str(old_done + 1)
+                           + dashboard[count_match.end(2):])
         # Remove 🔵 line from In progress
         dashboard = re.sub(r"^- 🔵 .*$\n?", "", dashboard, flags=re.MULTILINE)
         # If In progress is now empty, restore (none)
@@ -311,6 +327,7 @@ class StatusTracker:
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
         self._write_state(Phase.IDLE)
+        self.assert_valid()
 
     # --- Bar operations (require active task) ---
 
