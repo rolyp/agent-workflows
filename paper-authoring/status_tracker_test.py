@@ -8,7 +8,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from status_tracker import Phase, StatusTracker, ValidationError
+from status_tracker import (
+    CHANGE_MARKUP, Phase, REVIEW_END, REVIEW_START, SELECT_END, SELECT_START,
+    StatusTracker, ValidationError,
+)
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.md"
 
@@ -108,7 +111,7 @@ class ConstructorTest(TestFixture):
         state_path.write_text('{"phase": "edit", "task": "My task"}\n')
         # Need select bars for edit phase to be valid
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\selectstart text \\selectend\n"
+            f"{SELECT_START} text {SELECT_END}\n"
         )
         # Need an in-progress task in dashboard
         (self.test_dir / "workflow" / "dashboard.md").write_text(
@@ -131,7 +134,7 @@ class InvariantTest(TestFixture):
     def test_orphaned_select_markers(self):
         tracker = self._make_tracker()
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\selectstart some text \\selectend\n"
+            f"{SELECT_START} some text {SELECT_END}\n"
         )
         with self.assertRaises(ValidationError) as ctx:
             tracker.assert_valid()
@@ -140,7 +143,7 @@ class InvariantTest(TestFixture):
     def test_orphaned_review_markers(self):
         tracker = self._make_tracker()
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\reviewstart some text \\reviewend\n"
+            f"{REVIEW_START} some text {REVIEW_END}\n"
         )
         with self.assertRaises(ValidationError) as ctx:
             tracker.assert_valid()
@@ -164,8 +167,8 @@ class InvariantTest(TestFixture):
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
-        (self.test_dir / "sec" / "a.tex").write_text("\\selectstart text \\selectend\n")
-        (self.test_dir / "sec" / "b.tex").write_text("\\reviewstart text \\reviewend\n")
+        (self.test_dir / "sec" / "a.tex").write_text(f"{SELECT_START} text {SELECT_END}\n")
+        (self.test_dir / "sec" / "b.tex").write_text(f"{REVIEW_START} text {REVIEW_END}\n")
         with self.assertRaises(ValidationError) as ctx:
             tracker.assert_valid()
         self.assertTrue(any("should not coexist" in e for e in ctx.exception.errors))
@@ -188,7 +191,7 @@ class StateTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\selectstart text \\selectend\n"
+            f"{SELECT_START} text {SELECT_END}\n"
         )
         tracker._write_state(Phase.EDIT, "Active task")
         tracker.begin_review()
@@ -201,7 +204,7 @@ class StateTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\reviewstart text \\reviewend\n"
+            f"{REVIEW_START} text {REVIEW_END}\n"
         )
         tracker._write_state(Phase.AUTHOR_REVIEW, "Active task")
         tracker.return_to_edit()
@@ -219,7 +222,7 @@ class StateTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\selectstart text \\selectend\n"
+            f"{SELECT_START} text {SELECT_END}\n"
         )
         tracker._write_state(Phase.EDIT, "Task A")
         tracker.begin_review()
@@ -235,12 +238,12 @@ class BeginReviewTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         tex = self.test_dir / "sec" / "test.tex"
-        tex.write_text("before \\selectstart middle \\selectend after\n")
+        tex.write_text(f"before {SELECT_START} middle {SELECT_END} after\n")
         tracker._write_state(Phase.EDIT, "Active task")
         tracker.begin_review()
         result = tex.read_text()
-        self.assertIn("\\reviewstart", result)
-        self.assertNotIn("\\selectstart", result)
+        self.assertIn(f"{REVIEW_START}", result)
+        self.assertNotIn(f"{SELECT_START}", result)
 
 
 class ReturnToEditTest(TestFixture):
@@ -250,12 +253,12 @@ class ReturnToEditTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         tex = self.test_dir / "sec" / "test.tex"
-        tex.write_text("before \\reviewstart middle \\reviewend after\n")
+        tex.write_text(f"before {REVIEW_START} middle {REVIEW_END} after\n")
         tracker._write_state(Phase.AUTHOR_REVIEW, "Active task")
         tracker.return_to_edit()
         result = tex.read_text()
-        self.assertIn("\\selectstart", result)
-        self.assertNotIn("\\reviewstart", result)
+        self.assertIn(f"{SELECT_START}", result)
+        self.assertNotIn(f"{REVIEW_START}", result)
 
 
 class CheckEditTest(TestFixture):
@@ -268,7 +271,7 @@ class CheckEditTest(TestFixture):
     def test_tex_edit_blocked_without_change_markup(self):
         tracker = self._make_tracker()
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\reviewstart old text \\reviewend\n"
+            f"{REVIEW_START} old text {REVIEW_END}\n"
         )
         allowed, msg = tracker.check_edit("sec/test.tex", "old text", "new text")
         self.assertFalse(allowed)
@@ -285,7 +288,7 @@ class CheckEditTest(TestFixture):
         """Ad hoc edit: review bars + change markup, idle phase."""
         tracker = self._make_tracker()
         (self.test_dir / "sec" / "test.tex").write_text(
-            "before \\reviewstart old text \\reviewend after\n"
+            f"before {REVIEW_START} old text {REVIEW_END} after\n"
         )
         allowed, msg = tracker.check_edit("sec/test.tex", "old text", "\\deleted{old text}")
         self.assertTrue(allowed)
@@ -296,7 +299,7 @@ class CheckEditTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            "before \\selectstart editable text \\selectend after\n"
+            f"before {SELECT_START} editable text {SELECT_END} after\n"
         )
         tracker._write_state(Phase.EDIT, "Some task")
         allowed, msg = tracker.check_edit("sec/test.tex", "editable text", "\\replaced{new}{editable text}")
@@ -309,7 +312,7 @@ class CheckEditTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\reviewstart text \\reviewend\n"
+            f"{REVIEW_START} text {REVIEW_END}\n"
         )
         tracker._write_state(Phase.EDIT, "Some task")
         allowed, msg = tracker.check_edit("sec/test.tex", "text", "\\deleted{text}")
@@ -322,7 +325,7 @@ class CheckEditTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            "\\reviewstart text \\reviewend\n"
+            f"{REVIEW_START} text {REVIEW_END}\n"
         )
         tracker._write_state(Phase.AUTHOR_REVIEW, "Some task")
         allowed, msg = tracker.check_edit("sec/test.tex", "text", "\\deleted{text}")
