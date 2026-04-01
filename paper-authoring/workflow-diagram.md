@@ -7,15 +7,18 @@ flowchart TD
     classDef author fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
     classDef assistant fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
     classDef phase fill:#eceff1,stroke:#546e7a,stroke-width:3px,color:#263238
+    classDef entry fill:#fce4ec,stroke:#c62828,stroke-width:2px,color:#b71c1c
 
-    START(("▶"))
+    CS["Cold Start"]:::entry
+    RFT["Reviewer Feedback<br/>Triage"]:::entry
 
     P1["Task Selection"]:::phase
     P2["Edit / Dismiss"]:::phase
     P3["Author Review"]:::phase
     P4["Structural Close-out"]:::phase
 
-    START --> P1
+    CS -- "/ populate dashboard" --> P1
+    RFT -- "/ populate dashboard" --> P1
     P1 -- "[approve]" --> P2
     P1 -- "[reject] / select another" --> P1
     P1 -- "[bump] / move to structural" --> P1
@@ -30,7 +33,52 @@ flowchart TD
     P4 -- "[copy-edit failed] / return to author" --> P3
 ```
 
-Legend: 🟦 Author-assistant 🟢 Human author. See [phase details](#phase-details) below.
+Legend: 🟦 Author-assistant 🟢 Human author 🟥 Entry point. See [entry points](#entry-points) and [phase details](#phase-details) below.
+
+---
+
+## Entry points
+
+### Cold Start
+
+```mermaid
+flowchart TD
+    classDef author fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+    classDef assistant fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
+    classDef structure fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px,color:#4a148c
+    classDef copyeditor fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c
+
+    SR["Full-paper<br/>structural review"]:::structure
+    TRIAGE_S{"Triage"}:::author
+    POLISHED{"Paper polished<br/>enough?"}:::author
+    CE["Full-paper<br/>copy-edit review"]:::copyeditor
+    COLLECT["Collect todos into<br/>minor-issues.md"]:::assistant
+
+    SR -- "/ produce structural.md" --> TRIAGE_S
+    TRIAGE_S -- "[approve] / add to dashboard" --> POLISHED
+    TRIAGE_S -- "[dismiss]" --> POLISHED
+    POLISHED -- "[yes]" --> CE
+    CE -- "/ insert \todo annotations" --> COLLECT
+    COLLECT -- "/ add to dashboard" --> EXIT(("→ Phase 1"))
+    POLISHED -- "[no]" --> EXIT
+```
+
+### Reviewer Feedback Triage
+
+```mermaid
+flowchart TD
+    classDef author fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+    classDef assistant fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
+
+    READ["Read reviews;<br/>extract actionable items;<br/>classify structural / minor"]:::assistant
+    TRIAGE{"Triage"}:::author
+
+    READ -- "/ present summary" --> TRIAGE
+    TRIAGE -- "[approve] / add to dashboard" --> EXIT(("→ Phase 1"))
+    TRIAGE -- "[reclassify]" --> TRIAGE
+    TRIAGE -- "[dismiss]" --> TRIAGE
+    TRIAGE -- "[merge items]" --> TRIAGE
+```
 
 ---
 

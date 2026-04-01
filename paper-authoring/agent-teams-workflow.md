@@ -95,6 +95,32 @@ Tasks move through: **To do** → **In progress** → **Done**.
 
 ---
 
+## Entry points
+
+Two independent entry points can populate the dashboard before the Phase 1–4 cycle begins. When both apply, run reviewer feedback triage first — external feedback may reshape direction, making some structural/copy-edit findings moot.
+
+### Cold start
+
+For a pre-existing paper not yet using this workflow.
+
+- Invoke **Structure Reviewer** for full-paper initial pass → produces `workflow/todo/structural.md`
+- **Author** triages each item: approve, dismiss, or defer
+- Approved items added to dashboard via **Status Tracker** → **add**
+- Optionally invoke **Copy Editor** in full-paper review mode (skip if paper is a rough draft)
+- **Author Assistant** collects `\todo` annotations into `workflow/todo/minor-issues.md`
+- Minor items added to dashboard via **Status Tracker** → **add**
+
+### Reviewer feedback triage
+
+For a paper (pre-existing or authored using this workflow) that has received external reviews.
+
+- **Author Assistant** reads reviews (e.g. `reviews/*.md`), extracts actionable items
+- Classify each as structural or minor; link back to source (e.g. "Review A, §Literate?")
+- Present summary to **Author** for triage: approve, reclassify, dismiss, or merge items
+- Approved items added to dashboard via **Status Tracker** → **add**; structural items also recorded in `workflow/todo/structural.md`
+
+---
+
 ## Author Assistant
 
 Drives the editing process. Owns paper content (`\added`/`\deleted`/`\replaced` markup and prose) but delegates all marker and task-state changes to **Status Tracker**.
