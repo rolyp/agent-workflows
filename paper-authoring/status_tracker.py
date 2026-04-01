@@ -182,6 +182,43 @@ class StatusTracker:
         target_text = target_path.read_text().rstrip()
         target_path.write_text(target_text + "\n\n" + note_block + "\n")
 
+    def add_task(self, note_id: str, description: str, kind: str) -> None:
+        """Add a task to the dashboard To do section.
+
+        kind must be 'structural' or 'minor'.
+        note_id is used to generate the link to the notes file.
+        """
+        assert kind in ("structural", "minor"), f"Invalid kind: {kind}"
+        notes_file = "structural.md" if kind == "structural" else "minor-issues.md"
+        link = f"[note](todo/{notes_file}#note-{note_id})"
+        entry = f"- {description} ({link})"
+
+        dashboard = self._read_dashboard()
+
+        # Insert under the appropriate ### heading
+        section = kind.capitalize()
+        pattern = rf"(^### {section}$\n\n)(.*?)(?=^### |\Z)"
+        match = re.search(pattern, dashboard, re.MULTILINE | re.DOTALL)
+        if not match:
+            raise ValueError(f"Section '### {section}' not found in dashboard")
+
+        existing = match.group(2).strip()
+        if existing == "(none)":
+            new_items = entry + "\n"
+        else:
+            new_items = existing + "\n" + entry + "\n"
+
+        dashboard = dashboard[:match.start(2)] + new_items + dashboard[match.end(2):]
+
+        # Update count
+        count_pattern = rf"(Completed {kind}.*?\(\d+ of )(\d+)\)"
+        count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
+        if count_match:
+            old_total = int(count_match.group(2))
+            dashboard = dashboard[:count_match.start(2)] + str(old_total + 1) + ")" + dashboard[count_match.end():]
+
+        self.dashboard_path.write_text(dashboard)
+
     def approve_triage(self) -> None:
         """Exit triage, enter idle (ready for Phase 1–4 cycle)."""
         self._write_state(Phase.IDLE)
@@ -303,6 +340,12 @@ def main() -> None:
             sys.exit(1)
         tracker.reclassify(sys.argv[2], sys.argv[3])
         print(f"Reclassified {sys.argv[2]} → {sys.argv[3]}")
+    elif command == "add-task":
+        if len(sys.argv) < 5:
+            print("Usage: status_tracker.py add-task <note-id> <description> <structural|minor>", file=sys.stderr)
+            sys.exit(1)
+        tracker.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
+        print(f"Added {sys.argv[4]} task: {sys.argv[3]}")
     elif command == "approve-triage":
         tracker.approve_triage()
         print("Triage complete; entering idle")
