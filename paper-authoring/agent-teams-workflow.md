@@ -53,7 +53,7 @@ Sole owner of all task state and marker coherence. **Author Assistant** must inv
 
 ### Files maintained
 
-- `workflow/dashboard.md` — primary view: **In progress**, **To do** sections, progress counts, links to review files (project-specific)
+- `workflow/dashboard.md` — primary view: **In progress**, **To do** sections, progress counts (project-specific)
 - `workflow/todo/completed.md` — archive of **Done** tasks (project-specific)
 - `\selectstart`/`\selectend` and `\reviewstart`/`\reviewend` in `.tex` files
 
@@ -115,9 +115,9 @@ For a pre-existing paper not yet using this workflow.
 For a paper (pre-existing or authored using this workflow) that has received external reviews.
 
 - **Author Assistant** reads reviews (e.g. `reviews/*.md`), extracts actionable items
-- Classify each as structural or minor; link back to source (e.g. "Review A, §Literate?")
+- Classify each as structural or minor
 - Present summary to **Author** for triage: approve, reclassify, dismiss, or merge items
-- Approved items added to dashboard via **Status Tracker** → **add**; structural items also recorded in `workflow/todo/structural.md`
+- Approved items added to dashboard via **Status Tracker** → **add**; structural items also recorded in `workflow/todo/structural.md` with links to source review files
 
 ---
 
