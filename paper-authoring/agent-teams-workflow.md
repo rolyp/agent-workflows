@@ -63,10 +63,12 @@ Tasks move through: **To do** → **In progress** → **Done**.
 
 ### Marker invariants
 
-1. **Select bars as editing precondition.** The passage corresponding to the active task (🔵) must be within `\selectstart`/`\selectend` during Phase 2. **Author Assistant** must not edit `.tex` content outside select bars for the current task.
-2. **Review bars as phase gate.** The *only* way to enter Phase 3 is via **begin-review**, which replaces select bars with review bars. Review bars never appear during Phase 2.
-3. **Approved markup outside bars is expected.** Previously approved `\added`/`\deleted`/`\replaced` markup sits outside any bars until the branch is merged. Not an inconsistency.
-4. **Editing outside bars means new work.** Wanting to edit a passage outside bars requires task selection (Phase 1) first.
+Mechanical invariants (at most one in-progress task, markers must match task state, select and review bars do not coexist, progress counts consistent) are enforced by `validate.py`.
+
+Editorial invariants (not mechanically enforceable):
+1. **Author Assistant** must not edit `.tex` content outside select bars for the current task
+2. **Approved markup outside bars is expected.** Previously approved `\added`/`\deleted`/`\replaced` markup sits outside any bars until the branch is merged — not an inconsistency
+3. **Editing outside bars means new work.** Wanting to edit a passage outside bars requires task selection (Phase 1) first
 
 ### Task dependencies
 
@@ -89,9 +91,9 @@ Tasks move through: **To do** → **In progress** → **Done**.
 | **complete-collaborative** | Author actively directed edits | As **complete**, but without Phase 3 ceremony. For subtasks where Author reviewed in real time. If 🔵 returns to parent: add `\selectstart`/`\selectend` around next passage before editing resumes |
 | **complete-tree** | Phase 4 confirmed | As **complete**, for task + subtree |
 | **add** | Phase 4 new issues, or author identifies new task | Add task to **To do** in dashboard; description should be sourced from **Structure Reviewer**'s proposed action in `structural.md` (for structural tasks) or from **Author** (for other tasks). If added as subtask of in-progress parent, move 🔵 to new leaf |
-| **validate** | Session resume, or any time | Check consistency (read-only): (1) progress counts match; (2) no orphaned items between dashboard and completed; (3) no task appears in more than one section (To do / In progress / Done); (4) 🔵 on correct leaf task; (5) in-progress task has corresponding `\selectstart`/`\selectend` in `.tex`; (6) no `\reviewstart` during Phase 2; (7) no stale `\added`/`\deleted`/`\replaced` markup outside current task's select/review bars |
+| **validate** | Session resume, or any time | Enforced by `validate.py` (runs automatically via session-start hook). See source for checked invariants |
 
-**Session resume:** **Author Assistant** invokes **Status Tracker** → **validate** as first action. **Status Tracker** checks and restores any missing markers before editing begins.
+**Session resume:** `validate.py` runs automatically via session-start hook. Output is injected into Claude's context.
 
 ---
 
