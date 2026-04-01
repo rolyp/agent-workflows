@@ -385,6 +385,7 @@ class StatusTracker:
     def _tex_files_containing(self, pattern: str) -> list[str]:
         return [
             f for f in glob.glob(str(self.root / "**" / "*.tex"), recursive=True)
+            if not f.startswith(str(self.root / "workflow"))
             if pattern in Path(f).read_text()
         ]
 
