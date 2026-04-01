@@ -1,0 +1,15 @@
+% Change-tracking macros for paper-authoring workflow.
+% Requires: xcolor, soul, changebar, marginnote packages.
+
+% Inline change markup
+\definecolor{addedcolor}{RGB}{0,160,0}
+\definecolor{deletedcolor}{RGB}{180,180,180}
+\newcommand{\added}[1]{\textcolor{addedcolor}{#1}}
+\newcommand{\deleted}[1]{\textcolor{deletedcolor}{\sout{#1}}}
+\newcommand{\replaced}[2]{\textcolor{deletedcolor}{\sout{#2}}\textcolor{addedcolor}{#1}}
+
+% Change bars for human review
+\newcommand{\reviewstart}{\cbcolor{red}\cbstart\marginnote{\parbox{1.2cm}{\scriptsize\itshape\textcolor{red}{Approval\\needed}}}}
+\newcommand{\reviewend}{\cbend}
+\newcommand{\editstart}{\cbcolor{blue}\cbstart\marginnote{\parbox{1.2cm}{\scriptsize\itshape\textcolor{blue}{In\\progress}}}}
+\newcommand{\editend}{\cbend}

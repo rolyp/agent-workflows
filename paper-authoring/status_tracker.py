@@ -15,9 +15,9 @@ from enum import Enum
 from pathlib import Path
 
 
-# LaTeX marker commands
-SELECT_START = "\\selectstart"
-SELECT_END = "\\selectend"
+# LaTeX marker commands (must match change-tracking.tex)
+EDIT_START = "\\editstart"
+EDIT_END = "\\editend"
 REVIEW_START = "\\reviewstart"
 REVIEW_END = "\\reviewend"
 
@@ -29,7 +29,7 @@ class Phase(Enum):
     IDLE = "idle"                        # No active task
     TRIAGE = "triage"                    # Reviewing structural/minor notes before editing cycle
     SELECTING = "selecting"              # Phase 1: choosing next task
-    EDIT = "edit"                        # Phase 2: editing within select bars
+    EDIT = "edit"                        # Phase 2: editing within edit bars
     AUTHOR_REVIEW = "author-review"      # Phase 3: awaiting author approval
     CLOSEOUT = "closeout"                # Phase 4: structural close-out
 
@@ -91,15 +91,15 @@ class StatusTracker:
         if self._count_in_progress(dashboard) > 0:
             return []
         errors = []
-        if self._tex_files_containing(SELECT_START):
-            errors.append(f"Orphaned {SELECT_START} markers but no in-progress task")
+        if self._tex_files_containing(EDIT_START):
+            errors.append(f"Orphaned {EDIT_START} markers but no in-progress task")
         if self._tex_files_containing(REVIEW_START):
             errors.append(f"Orphaned {REVIEW_START} markers but no in-progress task")
         return errors
 
     def _markers_do_not_coexist(self) -> list[str]:
-        if self._tex_files_containing(SELECT_START) and self._tex_files_containing(REVIEW_START):
-            return [f"Both {SELECT_START} and {REVIEW_START} markers present — should not coexist"]
+        if self._tex_files_containing(EDIT_START) and self._tex_files_containing(REVIEW_START):
+            return [f"Both {EDIT_START} and {REVIEW_START} markers present — should not coexist"]
         return []
 
     def _progress_counts_consistent(self, dashboard: str) -> list[str]:
@@ -123,14 +123,14 @@ class StatusTracker:
 
     def _state_consistent_with_markers(self) -> list[str]:
         phase = self._read_phase()
-        has_select = bool(self._tex_files_containing(SELECT_START))
+        has_edit = bool(self._tex_files_containing(EDIT_START))
         has_review = bool(self._tex_files_containing(REVIEW_START))
         errors = []
-        if phase is Phase.EDIT and not has_select:
-            errors.append("State is 'edit' but no select bars found in .tex files")
+        if phase is Phase.EDIT and not has_edit:
+            errors.append("State is 'edit' but no edit bars found in .tex files")
         if phase is Phase.AUTHOR_REVIEW and not has_review:
             errors.append("State is 'author-review' but no review bars found in .tex files")
-        if phase is Phase.IDLE and (has_select or has_review):
+        if phase is Phase.IDLE and (has_edit or has_review):
             errors.append("State is 'idle' but markers found in .tex files")
         return errors
 
@@ -239,29 +239,61 @@ class StatusTracker:
         self._write_state(Phase.IDLE)
         self.assert_valid()
 
-    # --- Phase transition commands ---
+    # --- Bar operations ---
 
-    def begin_review(self) -> None:
-        """Replace select bars with review bars in .tex files."""
-        for path in self._tex_files_containing(SELECT_START):
+    def open_edit(self, file_path: str, passage: str) -> None:
+        """Place edit bars around a passage in a .tex file."""
+        self._place_bars(file_path, passage, EDIT_START, EDIT_END)
+
+    def close_edit(self, file_path: str) -> None:
+        """Remove edit bars from a .tex file."""
+        self._remove_bars(file_path, EDIT_START, EDIT_END)
+
+    def open_review(self, file_path: str, passage: str) -> None:
+        """Place review bars around a passage in a .tex file."""
+        self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
+
+    def close_review(self, file_path: str) -> None:
+        """Remove review bars from a .tex file."""
+        self._remove_bars(file_path, REVIEW_START, REVIEW_END)
+
+    def edit_to_review(self) -> None:
+        """Swap all edit bars to review bars; transition to author-review phase."""
+        for path in self._tex_files_containing(EDIT_START):
             text = Path(path).read_text()
-            text = text.replace(SELECT_START, REVIEW_START)
-            text = text.replace(SELECT_END, REVIEW_END)
+            text = text.replace(EDIT_START, REVIEW_START)
+            text = text.replace(EDIT_END, REVIEW_END)
             Path(path).write_text(text)
         task = self.read_state().get("task")
         self._write_state(Phase.AUTHOR_REVIEW, task)
         self.assert_valid()
 
-    def return_to_edit(self) -> None:
-        """Replace review bars with select bars in .tex files."""
+    def review_to_edit(self) -> None:
+        """Swap all review bars to edit bars; transition to edit phase."""
         for path in self._tex_files_containing(REVIEW_START):
             text = Path(path).read_text()
-            text = text.replace(REVIEW_START, SELECT_START)
-            text = text.replace(REVIEW_END, SELECT_END)
+            text = text.replace(REVIEW_START, EDIT_START)
+            text = text.replace(REVIEW_END, EDIT_END)
             Path(path).write_text(text)
         task = self.read_state().get("task")
         self._write_state(Phase.EDIT, task)
         self.assert_valid()
+
+    def _place_bars(self, file_path: str, passage: str,
+                    start: str, end: str) -> None:
+        full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
+        content = full_path.read_text()
+        if passage not in content:
+            raise ValueError(f"Passage not found in {file_path}")
+        content = content.replace(passage, f"{start}{passage}{end}", 1)
+        full_path.write_text(content)
+
+    def _remove_bars(self, file_path: str, start: str, end: str) -> None:
+        full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
+        content = full_path.read_text()
+        content = content.replace(start, "")
+        content = content.replace(end, "")
+        full_path.write_text(content)
 
     # --- PreToolUse gate ---
 
@@ -291,30 +323,29 @@ class StatusTracker:
                 "(\\added, \\deleted, or \\replaced)."
             )
 
-        # Edits must be within bars (select or review)
+        # Edits must be within bars (edit or review)
         if old_string is not None:
             full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
             if full_path.exists():
                 content = full_path.read_text()
-                in_select = self._text_within_bars(content, old_string, SELECT_START, SELECT_END)
+                in_edit = self._text_within_bars(content, old_string, EDIT_START, EDIT_END)
                 in_review = self._text_within_bars(content, old_string, REVIEW_START, REVIEW_END)
-                if not in_select and not in_review:
+                if not in_edit and not in_review:
                     return False, (
                         f"Edit target is outside change bars in {file_path}. "
-                        f"Place {REVIEW_START}/{REVIEW_END} (ad hoc) or "
-                        f"{SELECT_START}/{SELECT_END} (task) around the passage first."
+                        f"Use `open-review` (ad hoc) or `open-edit` (task) first."
                     )
-                # During edit phase, must be in select bars specifically
-                if phase is Phase.EDIT and not in_select:
+                # During edit phase, must be in edit bars specifically
+                if phase is Phase.EDIT and not in_edit:
                     return False, (
                         f"Edit target is in review bars but phase is 'edit'. "
-                        f"Edits during 'edit' phase must be within {SELECT_START}/{SELECT_END}."
+                        f"Edits during 'edit' phase must be within {EDIT_START}/{EDIT_END}."
                     )
                 # During author-review, no edits allowed
                 if phase is Phase.AUTHOR_REVIEW:
                     return False, (
                         f"Cannot edit .tex files during author-review phase (task: {task}). "
-                        f"Run `status_tracker.py return-to-edit` first."
+                        f"Run `status_tracker.py review-to-edit` first."
                     )
 
         return True, ""
@@ -415,12 +446,24 @@ def main() -> None:
     elif command == "approve-triage":
         tracker.approve_triage()
         print("Triage complete; entering idle")
-    elif command == "begin-review":
-        tracker.begin_review()
-        print("Markers: select → review")
-    elif command == "return-to-edit":
-        tracker.return_to_edit()
-        print("Markers: review → select")
+    elif command == "open-review":
+        if len(sys.argv) < 4:
+            print("Usage: status_tracker.py open-review <file_path> <passage>", file=sys.stderr)
+            sys.exit(1)
+        tracker.open_review(sys.argv[2], sys.argv[3])
+        print(f"Review bars placed in {sys.argv[2]}")
+    elif command == "close-review":
+        if len(sys.argv) < 3:
+            print("Usage: status_tracker.py close-review <file_path>", file=sys.stderr)
+            sys.exit(1)
+        tracker.close_review(sys.argv[2])
+        print(f"Review bars removed from {sys.argv[2]}")
+    elif command == "edit-to-review":
+        tracker.edit_to_review()
+        print("Bars: edit → review")
+    elif command == "review-to-edit":
+        tracker.review_to_edit()
+        print("Bars: review → edit")
     elif command == "check-edit":
         if len(sys.argv) < 3:
             print("Usage: status_tracker.py check-edit <file_path>", file=sys.stderr)

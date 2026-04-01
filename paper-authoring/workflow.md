@@ -95,7 +95,8 @@ Drives the editing process. Owns paper content (`\added`/`\deleted`/`\replaced` 
 
 **Author** may direct a specific, bounded change to any passage at any time, outside the phase system:
 - **Author Assistant** applies `\added`/`\deleted`/`\replaced` markup
-- No select/review bars; no **Status Tracker** involvement
+- **Author Assistant** uses `open-review` to place review bars, applies markup, **Author** reviews
+- No **Status Tracker** task involvement
 - **Author** reviews proposed change before commit
 - If edit turns out to need broader investigation or touches multiple passages, escalate to a task
 
@@ -118,14 +119,14 @@ Works in four phases:
 
 **Author review:**
 - Once **Copy Editor** approves, or after 3 iterations:
-  - Invoke **Status Tracker** → `begin-review`; present to **Author**
+  - Invoke **Status Tracker** → `edit-to-review`; present to **Author**
   - If max iterations exceeded: note **Copy Editor** concerns remain
 - Do NOT commit until **Author** explicitly approves
 - On approval: commit; invoke **Status Tracker** → `complete`
   - Minor issues: return to Task selection
   - Structural issues: proceed to Structural close-out
 - On rejection: revert; return to Task selection
-- On **Author** requesting further changes: invoke **Status Tracker** → `return-to-edit`; return to Edit
+- On **Author** requesting further changes: invoke **Status Tracker** → `review-to-edit`; return to Edit
 - Keep `\added`/`\deleted`/`\replaced` markup until branch is merged
 
 **Collaborative shortcut:** when **Author** has been actively directing edits in the current session, they may approve and complete a subtask directly without Author review ceremony. Invoke **Status Tracker** → `complete-collaborative`. Parent task still requires full Author review.

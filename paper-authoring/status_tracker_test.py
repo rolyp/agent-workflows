@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from status_tracker import (
-    CHANGE_MARKUP, Phase, REVIEW_END, REVIEW_START, SELECT_END, SELECT_START,
+    CHANGE_MARKUP, EDIT_END, EDIT_START, Phase, REVIEW_END, REVIEW_START,
     StatusTracker, ValidationError,
 )
 
@@ -109,9 +109,9 @@ class ConstructorTest(TestFixture):
         self._write_workflow_files()
         state_path = self.test_dir / "workflow" / "state.json"
         state_path.write_text('{"phase": "edit", "task": "My task"}\n')
-        # Need select bars for edit phase to be valid
+        # Need edit bars for edit phase to be valid
         (self.test_dir / "sec" / "test.tex").write_text(
-            f"{SELECT_START} text {SELECT_END}\n"
+            f"{EDIT_START} text {EDIT_END}\n"
         )
         # Need an in-progress task in dashboard
         (self.test_dir / "workflow" / "dashboard.md").write_text(
@@ -131,10 +131,10 @@ class InvariantTest(TestFixture):
         tracker = self._make_tracker()
         tracker.assert_valid()  # should not raise
 
-    def test_orphaned_select_markers(self):
+    def test_orphaned_edit_markers(self):
         tracker = self._make_tracker()
         (self.test_dir / "sec" / "test.tex").write_text(
-            f"{SELECT_START} some text {SELECT_END}\n"
+            f"{EDIT_START} some text {EDIT_END}\n"
         )
         with self.assertRaises(ValidationError) as ctx:
             tracker.assert_valid()
@@ -167,7 +167,7 @@ class InvariantTest(TestFixture):
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
-        (self.test_dir / "sec" / "a.tex").write_text(f"{SELECT_START} text {SELECT_END}\n")
+        (self.test_dir / "sec" / "a.tex").write_text(f"{EDIT_START} text {EDIT_END}\n")
         (self.test_dir / "sec" / "b.tex").write_text(f"{REVIEW_START} text {REVIEW_END}\n")
         with self.assertRaises(ValidationError) as ctx:
             tracker.assert_valid()
@@ -185,20 +185,20 @@ class InvariantTest(TestFixture):
 
 
 class StateTest(TestFixture):
-    def test_begin_review_sets_review_phase(self):
+    def test_edit_to_review_sets_review_phase(self):
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            f"{SELECT_START} text {SELECT_END}\n"
+            f"{EDIT_START} text {EDIT_END}\n"
         )
         tracker._write_state(Phase.EDIT, "Active task")
-        tracker.begin_review()
+        tracker.edit_to_review()
         state = tracker.read_state()
         self.assertEqual(state["phase"], "author-review")
 
-    def test_return_to_edit_sets_edit_phase(self):
+    def test_review_to_edit_sets_edit_phase(self):
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
@@ -207,7 +207,7 @@ class StateTest(TestFixture):
             f"{REVIEW_START} text {REVIEW_END}\n"
         )
         tracker._write_state(Phase.AUTHOR_REVIEW, "Active task")
-        tracker.return_to_edit()
+        tracker.review_to_edit()
         state = tracker.read_state()
         self.assertEqual(state["phase"], "edit")
 
@@ -222,32 +222,32 @@ class StateTest(TestFixture):
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            f"{SELECT_START} text {SELECT_END}\n"
+            f"{EDIT_START} text {EDIT_END}\n"
         )
         tracker._write_state(Phase.EDIT, "Task A")
-        tracker.begin_review()
+        tracker.edit_to_review()
         dashboard = tracker._read_dashboard()
         self.assertEqual(dashboard.count("**State:**"), 1)
         self.assertIn("**State:** author-review — Task A", dashboard)
 
 
-class BeginReviewTest(TestFixture):
-    def test_swaps_select_to_review(self):
+class EditToReviewTest(TestFixture):
+    def test_swaps_edit_to_review(self):
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
         tex = self.test_dir / "sec" / "test.tex"
-        tex.write_text(f"before {SELECT_START} middle {SELECT_END} after\n")
+        tex.write_text(f"before {EDIT_START} middle {EDIT_END} after\n")
         tracker._write_state(Phase.EDIT, "Active task")
-        tracker.begin_review()
+        tracker.edit_to_review()
         result = tex.read_text()
         self.assertIn(f"{REVIEW_START}", result)
-        self.assertNotIn(f"{SELECT_START}", result)
+        self.assertNotIn(f"{EDIT_START}", result)
 
 
-class ReturnToEditTest(TestFixture):
-    def test_swaps_review_to_select(self):
+class ReviewToEditTest(TestFixture):
+    def test_swaps_review_to_edit(self):
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
@@ -255,9 +255,9 @@ class ReturnToEditTest(TestFixture):
         tex = self.test_dir / "sec" / "test.tex"
         tex.write_text(f"before {REVIEW_START} middle {REVIEW_END} after\n")
         tracker._write_state(Phase.AUTHOR_REVIEW, "Active task")
-        tracker.return_to_edit()
+        tracker.review_to_edit()
         result = tex.read_text()
-        self.assertIn(f"{SELECT_START}", result)
+        self.assertIn(f"{EDIT_START}", result)
         self.assertNotIn(f"{REVIEW_START}", result)
 
 
@@ -293,20 +293,20 @@ class CheckEditTest(TestFixture):
         allowed, msg = tracker.check_edit("sec/test.tex", "old text", "\\deleted{old text}")
         self.assertTrue(allowed)
 
-    def test_tex_edit_allowed_within_select_bars_edit_phase(self):
+    def test_tex_edit_allowed_within_edit_bars(self):
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            f"before {SELECT_START} editable text {SELECT_END} after\n"
+            f"before {EDIT_START} editable text {EDIT_END} after\n"
         )
         tracker._write_state(Phase.EDIT, "Some task")
         allowed, msg = tracker.check_edit("sec/test.tex", "editable text", "\\replaced{new}{editable text}")
         self.assertTrue(allowed)
 
     def test_tex_edit_blocked_in_review_bars_during_edit_phase(self):
-        """During edit phase, must be in select bars, not review bars."""
+        """During edit phase, must be in edit bars, not review bars."""
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
@@ -330,7 +330,7 @@ class CheckEditTest(TestFixture):
         tracker._write_state(Phase.AUTHOR_REVIEW, "Some task")
         allowed, msg = tracker.check_edit("sec/test.tex", "text", "\\deleted{text}")
         self.assertFalse(allowed)
-        self.assertIn("return-to-edit", msg)
+        self.assertIn("review-to-edit", msg)
 
     def test_tex_edit_blocked_during_triage(self):
         tracker = self._make_tracker()
