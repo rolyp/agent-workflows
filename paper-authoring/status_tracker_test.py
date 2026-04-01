@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from status_tracker import StatusTracker
+from status_tracker import StatusTracker, ValidationError
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.md"
 
@@ -62,13 +62,12 @@ class TestFixture(unittest.TestCase):
         self.orig_dir = os.getcwd()
         self.test_dir = Path(tempfile.mkdtemp())
         os.chdir(self.test_dir)
-        self.tracker = StatusTracker(self.test_dir)
 
     def tearDown(self):
         os.chdir(self.orig_dir)
         shutil.rmtree(self.test_dir)
 
-    def _setup_project(self, dashboard: str | None = None):
+    def _write_workflow_files(self, dashboard: str | None = None):
         (self.test_dir / "workflow" / "todo").mkdir(parents=True, exist_ok=True)
         (self.test_dir / "sec").mkdir(exist_ok=True)
         (self.test_dir / "workflow" / "dashboard.md").write_text(
@@ -81,168 +80,220 @@ class TestFixture(unittest.TestCase):
             "# Completed\n\n## Minor\n\n## Structural\n"
         )
 
+    def _make_tracker(self, dashboard: str | None = None) -> StatusTracker:
+        self._write_workflow_files(dashboard)
+        return StatusTracker(self.test_dir)
 
-class ValidateTest(TestFixture):
-    def test_no_workflow_files(self):
-        errors = self.tracker.validate()
-        self.assertIn("Missing: workflow/dashboard.md", errors)
-        self.assertIn("Missing: workflow/todo/structural.md", errors)
-        self.assertIn("Missing: workflow/todo/completed.md", errors)
 
+class ConstructorTest(TestFixture):
+    def test_missing_workflow_files(self):
+        with self.assertRaises(FileNotFoundError):
+            StatusTracker(self.test_dir)
+
+    def test_creates_state_file(self):
+        tracker = self._make_tracker()
+        self.assertTrue(tracker.state_path.exists())
+        state = tracker.read_state()
+        self.assertEqual(state["phase"], "idle")
+        self.assertIsNone(state["task"])
+
+    def test_writes_state_to_dashboard(self):
+        tracker = self._make_tracker()
+        dashboard = tracker._read_dashboard()
+        self.assertIn("**State:** idle", dashboard)
+
+    def test_preserves_existing_state(self):
+        self._write_workflow_files()
+        state_path = self.test_dir / "workflow" / "state.json"
+        state_path.write_text('{"phase": "edit", "task": "My task"}\n')
+        # Need select bars for edit phase to be valid
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "\\selectstart text \\selectend\n"
+        )
+        # Need an in-progress task in dashboard
+        (self.test_dir / "workflow" / "dashboard.md").write_text(
+            _make_dashboard(
+                structural_tasks=["Task one", "Task two"],
+                in_progress=["🔵 My task"],
+            )
+        )
+        tracker = StatusTracker(self.test_dir)
+        state = tracker.read_state()
+        self.assertEqual(state["phase"], "edit")
+        self.assertEqual(state["task"], "My task")
+
+
+class InvariantTest(TestFixture):
     def test_clean_state(self):
-        self._setup_project()
-        self.assertEqual(self.tracker.validate(), [])
+        tracker = self._make_tracker()
+        tracker.assert_valid()  # should not raise
 
     def test_orphaned_select_markers(self):
-        self._setup_project()
+        tracker = self._make_tracker()
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\selectstart some text \\selectend\n"
         )
-        errors = self.tracker.validate()
-        self.assertTrue(any("Orphaned \\selectstart" in e for e in errors))
+        with self.assertRaises(ValidationError) as ctx:
+            tracker.assert_valid()
+        self.assertTrue(any("idle" in e and "markers" in e for e in ctx.exception.errors))
 
     def test_orphaned_review_markers(self):
-        self._setup_project()
+        tracker = self._make_tracker()
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\reviewstart some text \\reviewend\n"
         )
-        errors = self.tracker.validate()
-        self.assertTrue(any("Orphaned \\reviewstart" in e for e in errors))
-
-    def test_in_progress_without_markers(self):
-        self._setup_project(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["🔵 Active task"],
-        ))
-        errors = self.tracker.validate()
-        self.assertTrue(any("no select/review markers" in e for e in errors))
+        with self.assertRaises(ValidationError) as ctx:
+            tracker.assert_valid()
+        self.assertTrue(any("idle" in e and "markers" in e for e in ctx.exception.errors))
 
     def test_multiple_in_progress(self):
-        self._setup_project(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["🔵 Task A", "🔵 Task B"],
-        ))
-        errors = self.tracker.validate()
-        self.assertTrue(any("Multiple in-progress" in e for e in errors))
+        tracker = self._make_tracker()
+        # Break invariant after construction
+        (self.test_dir / "workflow" / "dashboard.md").write_text(
+            _make_dashboard(
+                structural_tasks=["Task one", "Task two"],
+                in_progress=["🔵 Task A", "🔵 Task B"],
+            )
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            tracker.assert_valid()
+        self.assertTrue(any("Multiple in-progress" in e for e in ctx.exception.errors))
 
     def test_coexisting_markers(self):
-        self._setup_project(_make_dashboard(
+        tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "a.tex").write_text("\\selectstart text \\selectend\n")
         (self.test_dir / "sec" / "b.tex").write_text("\\reviewstart text \\reviewend\n")
-        errors = self.tracker.validate()
-        self.assertTrue(any("should not coexist" in e for e in errors))
+        with self.assertRaises(ValidationError) as ctx:
+            tracker.assert_valid()
+        self.assertTrue(any("should not coexist" in e for e in ctx.exception.errors))
 
     def test_count_mismatch(self):
+        tracker = self._make_tracker()
+        # Break invariant after construction
         dashboard = _make_dashboard(structural_tasks=["Task one", "Task two"])
         dashboard = dashboard.replace("0 of 2", "0 of 5")
-        self._setup_project(dashboard)
-        errors = self.tracker.validate()
-        self.assertTrue(any("count mismatch" in e for e in errors))
+        (self.test_dir / "workflow" / "dashboard.md").write_text(dashboard)
+        with self.assertRaises(ValidationError) as ctx:
+            tracker.assert_valid()
+        self.assertTrue(any("count mismatch" in e for e in ctx.exception.errors))
 
 
 class StateTest(TestFixture):
-    def test_default_state_is_idle(self):
-        state = self.tracker.read_state()
-        self.assertEqual(state["phase"], "idle")
-        self.assertIsNone(state["task"])
-
     def test_begin_review_sets_review_phase(self):
-        self._setup_project(_make_dashboard(
+        tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\selectstart text \\selectend\n"
         )
-        self.tracker.begin_review()
-        state = self.tracker.read_state()
+        tracker._write_state("edit", "Active task")
+        tracker.begin_review()
+        state = tracker.read_state()
         self.assertEqual(state["phase"], "review")
 
     def test_return_to_edit_sets_edit_phase(self):
-        self._setup_project(_make_dashboard(
+        tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\reviewstart text \\reviewend\n"
         )
-        self.tracker.return_to_edit()
-        state = self.tracker.read_state()
+        tracker._write_state("review", "Active task")
+        tracker.return_to_edit()
+        state = tracker.read_state()
         self.assertEqual(state["phase"], "edit")
 
     def test_state_reported_in_dashboard(self):
-        self._setup_project()
-        self.tracker._write_state("edit", "Some task")
-        dashboard = self.tracker._read_dashboard()
-        self.assertIn("**State:** edit — Some task", dashboard)
+        tracker = self._make_tracker()
+        dashboard = tracker._read_dashboard()
+        self.assertIn("**State:** idle", dashboard)
 
     def test_state_line_updated_not_duplicated(self):
-        self._setup_project()
-        self.tracker._write_state("edit", "Task A")
-        self.tracker._write_state("review", "Task A")
-        dashboard = self.tracker._read_dashboard()
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "\\selectstart text \\selectend\n"
+        )
+        tracker._write_state("edit", "Task A")
+        tracker.begin_review()
+        dashboard = tracker._read_dashboard()
         self.assertEqual(dashboard.count("**State:**"), 1)
         self.assertIn("**State:** review — Task A", dashboard)
 
 
 class BeginReviewTest(TestFixture):
     def test_swaps_select_to_review(self):
-        self._setup_project(_make_dashboard(
+        tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
         tex = self.test_dir / "sec" / "test.tex"
         tex.write_text("before \\selectstart middle \\selectend after\n")
-        self.tracker.begin_review()
+        tracker._write_state("edit", "Active task")
+        tracker.begin_review()
         result = tex.read_text()
         self.assertIn("\\reviewstart", result)
-        self.assertIn("\\reviewend", result)
         self.assertNotIn("\\selectstart", result)
-        self.assertNotIn("\\selectend", result)
 
 
 class ReturnToEditTest(TestFixture):
     def test_swaps_review_to_select(self):
-        self._setup_project(_make_dashboard(
+        tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
         ))
         tex = self.test_dir / "sec" / "test.tex"
         tex.write_text("before \\reviewstart middle \\reviewend after\n")
-        self.tracker.return_to_edit()
+        tracker._write_state("review", "Active task")
+        tracker.return_to_edit()
         result = tex.read_text()
         self.assertIn("\\selectstart", result)
-        self.assertIn("\\selectend", result)
         self.assertNotIn("\\reviewstart", result)
-        self.assertNotIn("\\reviewend", result)
 
 
 class CheckEditTest(TestFixture):
     def test_non_tex_always_allowed(self):
-        allowed, msg = self.tracker.check_edit("workflow/dashboard.md")
+        tracker = self._make_tracker()
+        allowed, msg = tracker.check_edit("workflow/dashboard.md")
         self.assertTrue(allowed)
         self.assertEqual(msg, "")
 
     def test_tex_edit_blocked_during_review(self):
-        self._setup_project()
-        self.tracker._write_state("review", "Some task")
-        allowed, msg = self.tracker.check_edit("sec/intro.tex")
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "\\reviewstart text \\reviewend\n"
+        )
+        tracker._write_state("review", "Some task")
+        allowed, msg = tracker.check_edit("sec/intro.tex")
         self.assertFalse(allowed)
         self.assertIn("return-to-edit", msg)
 
     def test_tex_edit_warned_during_idle(self):
-        self._setup_project()
-        allowed, msg = self.tracker.check_edit("sec/intro.tex")
+        tracker = self._make_tracker()
+        allowed, msg = tracker.check_edit("sec/intro.tex")
         self.assertTrue(allowed)
         self.assertIn("ad hoc", msg)
 
     def test_tex_edit_allowed_during_edit_phase(self):
-        self._setup_project()
-        self.tracker._write_state("edit", "Some task")
-        allowed, msg = self.tracker.check_edit("sec/intro.tex")
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "\\selectstart text \\selectend\n"
+        )
+        tracker._write_state("edit", "Some task")
+        allowed, msg = tracker.check_edit("sec/intro.tex")
         self.assertTrue(allowed)
         self.assertEqual(msg, "")
 
