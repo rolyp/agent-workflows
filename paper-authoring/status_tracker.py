@@ -113,11 +113,12 @@ class StatusTracker:
             done = int(match.group(1))
             total = int(match.group(2))
             todo = self._count_section_items(dashboard, kind.capitalize())
-            expected = done + todo
+            in_prog = self._count_in_progress_for_kind(dashboard, kind)
+            expected = done + in_prog + todo
             if total != expected:
                 errors.append(
                     f"{kind} count mismatch: header says {done} of {total}, "
-                    f"but {done} done + {todo} to-do = {expected}"
+                    f"but {done} done + {in_prog} in-progress + {todo} to-do = {expected}"
                 )
         return errors
 
@@ -256,22 +257,24 @@ class StatusTracker:
         # Add to In progress with 🔵
         dashboard = dashboard.replace(
             "## In progress\n\n(none)",
-            f"## In progress\n\n🔵 {task_line}",
+            f"## In progress\n\n{task_line[:2]}🔵 {task_line[2:]}",
         )
         self.dashboard_path.write_text(dashboard)
         self._place_bars(file_path, passage, EDIT_START, EDIT_END)
         self._write_state(Phase.EDIT, note_id)
+        self.assert_valid()
 
     def select_ad_hoc(self, file_path: str, passage: str) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
         dashboard = self._read_dashboard()
         dashboard = dashboard.replace(
             "## In progress\n\n(none)",
-            f"## In progress\n\n🔵 {self.AD_HOC}",
+            f"## In progress\n\n- 🔵 {self.AD_HOC}",
         )
         self.dashboard_path.write_text(dashboard)
         self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
         self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC)
+        self.assert_valid()
 
     def complete_task(self) -> None:
         """Complete the current task; remove bars and In Progress entry."""
@@ -279,7 +282,7 @@ class StatusTracker:
         task = state.get("task")
         dashboard = self._read_dashboard()
         # Remove 🔵 line from In progress
-        dashboard = re.sub(r"^🔵 .*$\n?", "", dashboard, flags=re.MULTILINE)
+        dashboard = re.sub(r"^- 🔵 .*$\n?", "", dashboard, flags=re.MULTILINE)
         # If In progress is now empty, restore (none)
         dashboard = re.sub(
             r"(## In progress\n\n)\s*\n",
@@ -439,6 +442,22 @@ class StatusTracker:
             rf"{re.escape(start_marker)}(.*?){re.escape(end_marker)}", content, re.DOTALL
         )
         return any(text in region for region in regions)
+
+
+    def _count_in_progress_for_kind(self, dashboard: str, kind: str) -> int:
+        """Count in-progress items that belong to the given kind (minor/structural)."""
+        in_progress_section = re.search(
+            r"^## In progress$\n(.*?)(?=^## )", dashboard, re.MULTILINE | re.DOTALL
+        )
+        if not in_progress_section:
+            return 0
+        section = in_progress_section.group(1)
+        if kind == "minor":
+            # Minor tasks link to minor-issues.md
+            return len(re.findall(r"minor-issues\.md", section))
+        else:
+            # Structural tasks link to structural.md
+            return len(re.findall(r"structural\.md", section))
 
     def _minor_issues_path(self) -> Path:
         return self.root / "workflow" / "todo" / "minor-issues.md"
