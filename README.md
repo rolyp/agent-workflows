@@ -1,0 +1,28 @@
+# agent-workflows
+
+Shared workflow definitions for Claude Code agent teams, designed to be consumed as a Git submodule.
+
+## Workflows
+
+- **[paper-authoring](paper-authoring/)** — 4-phase editing workflow for academic papers with human-in-the-loop review. Roles: Author (human), Author Assistant (team lead), Copy Editor, Structure Reviewer, Librarian, Status Tracker.
+
+## Usage
+
+Add as a submodule in your project repo:
+
+```bash
+git submodule add https://github.com/rolyp/agent-workflows.git workflow/agent-workflows
+```
+
+Copy starter templates into your project's `workflow/` directory:
+
+```bash
+cp workflow/agent-workflows/paper-authoring/templates/dashboard.md workflow/
+cp -r workflow/agent-workflows/paper-authoring/templates/todo workflow/
+```
+
+Point your `CLAUDE.md` at the workflow:
+
+```
+Follow `workflow/agent-workflows/paper-authoring/agent-teams-workflow.md` for all paper editing.
+```
