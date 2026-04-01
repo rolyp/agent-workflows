@@ -43,6 +43,8 @@ CMD_EDIT_TO_REVIEW = "edit-to-review"
 CMD_REVIEW_TO_EDIT = "review-to-edit"
 CMD_CREATE_PLAN = "create-plan"
 CMD_APPROVE_PLAN = "approve-plan"
+CMD_ADD_SUBTASK = "add-subtask"
+CMD_SELECT_SUBTASK = "select-subtask"
 CMD_CHECK_EDIT = "check-edit"
 
 
@@ -179,18 +181,26 @@ class StatusTracker:
     def _read_phase(self) -> Phase:
         return Phase(self.read_state()["phase"])
 
-    def _write_state(self, phase: Phase, task: str | None = None) -> None:
+    def _write_state(self, phase: Phase, task: str | None = None, regions: list | None = None) -> None:
         """Replace the top frame of the state stack."""
         stack = self._read_stack()
-        stack[-1] = {"phase": phase.value, "task": task}
+        frame = {"phase": phase.value, "task": task}
+        if regions is not None:
+            frame["regions"] = [[f, p] for f, p in regions]
+        elif "regions" in stack[-1]:
+            frame["regions"] = stack[-1]["regions"]
+        stack[-1] = frame
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
         self._update_dashboard_state(phase, task)
         self.assert_valid()
 
-    def _push_state(self, phase: Phase, task: str | None = None) -> None:
+    def _push_state(self, phase: Phase, task: str | None = None, regions: list | None = None) -> None:
         """Push a new frame onto the state stack."""
         stack = self._read_stack()
-        stack.append({"phase": phase.value, "task": task})
+        frame = {"phase": phase.value, "task": task}
+        if regions is not None:
+            frame["regions"] = [[f, p] for f, p in regions]
+        stack.append(frame)
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
         self._update_dashboard_state(phase, task)
         self.assert_valid()
@@ -204,7 +214,6 @@ class StatusTracker:
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
         top = stack[-1]
         self._update_dashboard_state(Phase(top["phase"]), top.get("task"))
-        self.assert_valid()
         return popped
 
     def _update_dashboard_state(self, phase: Phase, task: str | None) -> None:
@@ -324,7 +333,7 @@ class StatusTracker:
         self.dashboard_path.write_text(dashboard)
         for file_path, passage in regions:
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
-        self._write_state(Phase.EDIT, note_id)
+        self._write_state(Phase.EDIT, note_id, regions=regions)
 
     def select_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review).
@@ -341,7 +350,7 @@ class StatusTracker:
         self.dashboard_path.write_text(dashboard)
         for file_path, passage in regions:
             self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
-        self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC)
+        self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC, regions=regions)
 
     # --- Planning ---
 
@@ -383,44 +392,110 @@ class StatusTracker:
         if phase is not Phase.PLANNING:
             raise ValueError(f"Can only approve plans during planning phase (current: {phase.value})")
         self._pop_state()
+        self.assert_valid()
 
     def complete_task(self) -> None:
-        """Complete the current task; remove bars, update counts, return to idle."""
+        """Complete the current task or subtask.
+
+        If completing a subtask (stack depth > 1): remove bars, mark subtask done
+        in dashboard, pop state back to parent.
+        If completing a top-level task: remove bars, update counts, return to idle.
+        """
         state = self.read_state()
         task = state.get("task")
-        dashboard = self._read_dashboard()
-        # Determine kind from the in-progress line
-        in_progress_match = re.search(r"^- 🔵 .*$", dashboard, re.MULTILINE)
-        if in_progress_match:
-            line = in_progress_match.group(0)
-            if "minor-issues.md" in line:
-                kind = "minor"
-            else:
-                kind = "structural"
-            # Increment done count
-            count_pattern = rf"(Completed {kind}.*?\()(\d+)( of \d+\))"
-            count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
-            if count_match:
-                old_done = int(count_match.group(2))
-                dashboard = (dashboard[:count_match.start(2)]
-                           + str(old_done + 1)
-                           + dashboard[count_match.end(2):])
-        # Remove 🔵 line from In progress
-        dashboard = re.sub(r"^- 🔵 .*$\n?", "", dashboard, flags=re.MULTILINE)
-        # If In progress is now empty, restore (none)
-        dashboard = re.sub(
-            r"(## In progress\n\n)\s*\n",
-            r"\1(none)\n\n",
-            dashboard,
-        )
-        self.dashboard_path.write_text(dashboard)
+        stack = self._read_stack()
+
         # Remove all bars from .tex files
         for path in (self._tex_files_containing(EDIT_START)
                      + self._tex_files_containing(REVIEW_START)):
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
         self._build()
-        self._write_state(Phase.IDLE)
+
+        dashboard = self._read_dashboard()
+
+        if len(stack) > 1:
+            # Completing a subtask — mark done with strikethrough, pop state
+            pattern = rf"^  - 🔵 (.+subtask: {re.escape(task)}\))$"
+            match = re.search(pattern, dashboard, re.MULTILINE)
+            if match:
+                old_line = match.group(0)
+                dashboard = dashboard.replace(old_line, f"  - ~~{match.group(1)}~~")
+                self.dashboard_path.write_text(dashboard)
+            popped = self._pop_state()
+            # Restore parent bars from stored regions
+            parent = self.read_state()
+            parent_regions = parent.get("regions", [])
+            for file_path, passage in parent_regions:
+                full_path = self.root / file_path
+                if full_path.exists() and passage in full_path.read_text():
+                    self._place_bars(file_path, passage, EDIT_START, EDIT_END)
+            self.assert_valid()
+        else:
+            # Completing a top-level task
+            in_progress_match = re.search(r"^- 🔵 .*$", dashboard, re.MULTILINE)
+            if in_progress_match:
+                line = in_progress_match.group(0)
+                if "minor-issues.md" in line:
+                    kind = "minor"
+                else:
+                    kind = "structural"
+                # Increment done count
+                count_pattern = rf"(Completed {kind}.*?\()(\d+)( of \d+\))"
+                count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
+                if count_match:
+                    old_done = int(count_match.group(2))
+                    dashboard = (dashboard[:count_match.start(2)]
+                               + str(old_done + 1)
+                               + dashboard[count_match.end(2):])
+            # Remove entire in-progress block (parent + subtasks)
+            dashboard = re.sub(r"^- 🔵 .*$\n?(  - .*\n)*", "", dashboard, flags=re.MULTILINE)
+            # If In progress is now empty, restore (none)
+            dashboard = re.sub(
+                r"(## In progress\n\n)\s*\n",
+                r"\1(none)\n\n",
+                dashboard,
+            )
+            self.dashboard_path.write_text(dashboard)
+            self._write_state(Phase.IDLE)
+
+    # --- Subtasks ---
+
+    def add_subtask(self, subtask_id: str, description: str) -> None:
+        """Add a subtask under the current in-progress task in the dashboard."""
+        dashboard = self._read_dashboard()
+        in_progress_match = re.search(r"^(- 🔵 .*)$", dashboard, re.MULTILINE)
+        if not in_progress_match:
+            raise ValueError("No in-progress task to add subtask to")
+        parent_line = in_progress_match.group(1)
+        subtask_line = f"  - {description} (subtask: {subtask_id})"
+        dashboard = dashboard.replace(
+            parent_line,
+            parent_line + "\n" + subtask_line,
+        )
+        self.dashboard_path.write_text(dashboard)
+
+    def select_subtask(self, subtask_id: str, regions: list[tuple[str, str]]) -> None:
+        """Select a subtask; remove parent bars, place subtask bars, push state."""
+        if not regions:
+            raise ValueError("At least one edit region required")
+        # Remove all current bars
+        for path in (self._tex_files_containing(EDIT_START)
+                     + self._tex_files_containing(REVIEW_START)):
+            self._remove_bars(path, EDIT_START, EDIT_END)
+            self._remove_bars(path, REVIEW_START, REVIEW_END)
+        # Place subtask bars
+        for file_path, passage in regions:
+            self._place_bars(file_path, passage, EDIT_START, EDIT_END)
+        # Mark subtask active in dashboard
+        dashboard = self._read_dashboard()
+        pattern = rf"^(  - .+subtask: {re.escape(subtask_id)}\))$"
+        match = re.search(pattern, dashboard, re.MULTILINE)
+        if match:
+            old_line = match.group(1)
+            dashboard = dashboard.replace(old_line, f"  - 🔵 {old_line[4:]}")
+            self.dashboard_path.write_text(dashboard)
+        self._push_state(Phase.EDIT, subtask_id, regions=regions)
 
     # --- Bar operations (require active task) ---
 
@@ -661,7 +736,8 @@ class StatusTracker:
         return self.dashboard_path.read_text()
 
     def _count_in_progress(self, dashboard: str) -> int:
-        return len(re.findall("🔵", dashboard))
+        """Count top-level in-progress tasks (not subtasks)."""
+        return len(re.findall(r"^- 🔵", dashboard, re.MULTILINE))
 
     def _tex_files_containing(self, pattern: str) -> list[str]:
         return [
@@ -752,6 +828,19 @@ def main() -> None:
     elif command == CMD_APPROVE_PLAN:
         tracker.approve_plan()
         print("Plan approved; returning to edit phase")
+    elif command == CMD_ADD_SUBTASK:
+        if len(sys.argv) < 4:
+            print(f"Usage: status_tracker.py {CMD_ADD_SUBTASK} <subtask-id> <description>", file=sys.stderr)
+            sys.exit(1)
+        tracker.add_subtask(sys.argv[2], sys.argv[3])
+        print(f"Added subtask: {sys.argv[2]}")
+    elif command == CMD_SELECT_SUBTASK:
+        if len(sys.argv) < 4:
+            print(f"Usage: status_tracker.py {CMD_SELECT_SUBTASK} <subtask-id> <regions-json>", file=sys.stderr)
+            sys.exit(1)
+        regions = json.loads(sys.argv[3])
+        tracker.select_subtask(sys.argv[2], [(r[0], r[1]) for r in regions])
+        print(f"Selected subtask: {sys.argv[2]} ({len(regions)} region(s))")
     elif command == CMD_COMPLETE_TASK:
         tracker.complete_task()
         print("Task completed")
