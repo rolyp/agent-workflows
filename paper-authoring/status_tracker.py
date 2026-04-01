@@ -80,7 +80,9 @@ class StatusTracker:
 
         # Initialise state file if absent
         if not self.state_path.exists():
-            self._write_state(Phase.IDLE)
+            stack = [{"phase": Phase.IDLE.value, "task": None}]
+            self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+            self._update_dashboard_state(Phase.IDLE, None)
 
         self.assert_valid()
 
@@ -157,19 +159,53 @@ class StatusTracker:
             errors.append("State is 'idle' but markers found in .tex files")
         return errors
 
-    # --- State ---
+    # --- State (pushdown automaton: stack of {phase, task} frames) ---
 
     def read_state(self) -> dict:
-        return json.loads(self.state_path.read_text())
+        """Read the top frame of the state stack."""
+        raw = json.loads(self.state_path.read_text())
+        # Migration: flat dict → stack
+        if isinstance(raw, dict):
+            return raw
+        return raw[-1]
+
+    def _read_stack(self) -> list[dict]:
+        raw = json.loads(self.state_path.read_text())
+        # Migration: flat dict → stack
+        if isinstance(raw, dict):
+            return [raw]
+        return raw
 
     def _read_phase(self) -> Phase:
         return Phase(self.read_state()["phase"])
 
     def _write_state(self, phase: Phase, task: str | None = None) -> None:
-        state = {"phase": phase.value, "task": task}
-        self.state_path.write_text(json.dumps(state, indent=2) + "\n")
+        """Replace the top frame of the state stack."""
+        stack = self._read_stack()
+        stack[-1] = {"phase": phase.value, "task": task}
+        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
         self._update_dashboard_state(phase, task)
         self.assert_valid()
+
+    def _push_state(self, phase: Phase, task: str | None = None) -> None:
+        """Push a new frame onto the state stack."""
+        stack = self._read_stack()
+        stack.append({"phase": phase.value, "task": task})
+        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        self._update_dashboard_state(phase, task)
+        self.assert_valid()
+
+    def _pop_state(self) -> dict:
+        """Pop the top frame and return it. Restores the previous frame."""
+        stack = self._read_stack()
+        if len(stack) <= 1:
+            raise ValueError("Cannot pop the last state frame")
+        popped = stack.pop()
+        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        top = stack[-1]
+        self._update_dashboard_state(Phase(top["phase"]), top.get("task"))
+        self.assert_valid()
+        return popped
 
     def _update_dashboard_state(self, phase: Phase, task: str | None) -> None:
         if not self.dashboard_path.exists():
@@ -338,16 +374,15 @@ class StatusTracker:
             if "plan" not in old_line:
                 dashboard = dashboard.replace(old_line, old_line + plan_link)
                 self.dashboard_path.write_text(dashboard)
-        self._write_state(Phase.PLANNING, task)
+        self._push_state(Phase.PLANNING, task)
         return plan_path
 
     def approve_plan(self) -> None:
-        """Approve the plan and return to edit phase."""
+        """Approve the plan and pop back to the previous phase."""
         phase = self._read_phase()
         if phase is not Phase.PLANNING:
             raise ValueError(f"Can only approve plans during planning phase (current: {phase.value})")
-        state = self.read_state()
-        self._write_state(Phase.EDIT, state.get("task"))
+        self._pop_state()
 
     def complete_task(self) -> None:
         """Complete the current task; remove bars, update counts, return to idle."""

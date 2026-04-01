@@ -109,7 +109,7 @@ class ConstructorTest(TestFixture):
     def test_preserves_existing_state(self):
         self._write_workflow_files()
         state_path = self.test_dir / "workflow" / "state.json"
-        state_path.write_text('{"phase": "edit", "task": "My task"}\n')
+        state_path.write_text('[{"phase": "edit", "task": "My task"}]\n')
         # Need edit bars for edit phase to be valid
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{EDIT_START} text {EDIT_END}\n"
@@ -289,7 +289,7 @@ class CheckEditTest(TestFixture):
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{EDIT_START} old text {EDIT_END}\n"
         )
-        tracker.state_path.write_text(json.dumps({"phase": "edit", "task": "Active task"}) + "\n")
+        tracker.state_path.write_text(json.dumps([{"phase": "edit", "task": "Active task"}]) + "\n")
         allowed, msg = tracker.check_edit("sec/test.tex", "old text", "new text")
         self.assertFalse(allowed)
         self.assertIn("change markup", msg)
@@ -300,7 +300,7 @@ class CheckEditTest(TestFixture):
             in_progress=["\U0001f535 Active task"],
         ))
         (self.test_dir / "sec" / "test.tex").write_text("bare text\n")
-        tracker.state_path.write_text(json.dumps({"phase": "edit", "task": "Active task"}) + "\n")
+        tracker.state_path.write_text(json.dumps([{"phase": "edit", "task": "Active task"}]) + "\n")
         allowed, msg = tracker.check_edit("sec/test.tex", "bare text", "\\deleted{bare text}")
         self.assertFalse(allowed)
         self.assertIn("outside change bars", msg)
@@ -340,7 +340,7 @@ class CheckEditTest(TestFixture):
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{REVIEW_START} text {REVIEW_END}\n"
         )
-        tracker.state_path.write_text(json.dumps({"phase": "edit", "task": "Some task"}) + "\n")
+        tracker.state_path.write_text(json.dumps([{"phase": "edit", "task": "Some task"}]) + "\n")
         allowed, msg = tracker.check_edit("sec/test.tex", "text", "\\deleted{text}")
         self.assertFalse(allowed)
         self.assertIn("review bars but phase is 'edit'", msg)
