@@ -265,8 +265,13 @@ class StatusTracker:
 
     AD_HOC = "Ad hoc"
 
-    def select_task(self, note_id: str, file_path: str, passage: str) -> None:
-        """Select a named task from To Do; move to In Progress; place edit bars."""
+    def select_task(self, note_id: str, regions: list[tuple[str, str]]) -> None:
+        """Select a named task from To Do; move to In Progress; place edit bars.
+
+        regions is a list of (file_path, passage) pairs to place edit bars around.
+        """
+        if not regions:
+            raise ValueError("At least one edit region required")
         dashboard = self._read_dashboard()
         # Find and remove the task line from To do
         pattern = rf"^- .+#note-{re.escape(note_id)}\).*$"
@@ -281,18 +286,25 @@ class StatusTracker:
             f"## In progress\n\n{task_line[:2]}🔵 {task_line[2:]}",
         )
         self.dashboard_path.write_text(dashboard)
-        self._place_bars(file_path, passage, EDIT_START, EDIT_END)
+        for file_path, passage in regions:
+            self._place_bars(file_path, passage, EDIT_START, EDIT_END)
         self._write_state(Phase.EDIT, note_id)
 
-    def select_ad_hoc(self, file_path: str, passage: str) -> None:
-        """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
+    def select_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
+        """Start an ad hoc edit; place review bars (skips Edit, goes to review).
+
+        regions is a list of (file_path, passage) pairs.
+        """
+        if not regions:
+            raise ValueError("At least one edit region required")
         dashboard = self._read_dashboard()
         dashboard = dashboard.replace(
             "## In progress\n\n(none)",
             f"## In progress\n\n- 🔵 {self.AD_HOC}",
         )
         self.dashboard_path.write_text(dashboard)
-        self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
+        for file_path, passage in regions:
+            self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
         self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC)
 
     # --- Planning ---
@@ -682,17 +694,20 @@ def main() -> None:
         tracker.approve_triage()
         print("Triage complete; entering idle")
     elif command == CMD_SELECT_TASK:
-        if len(sys.argv) < 5:
-            print(f"Usage: status_tracker.py {CMD_SELECT_TASK} <note-id> <file_path> <passage>", file=sys.stderr)
-            sys.exit(1)
-        tracker.select_task(sys.argv[2], sys.argv[3], sys.argv[4])
-        print(f"Selected task: {sys.argv[2]}")
-    elif command == CMD_SELECT_AD_HOC:
         if len(sys.argv) < 4:
-            print(f"Usage: status_tracker.py {CMD_SELECT_AD_HOC} <file_path> <passage>", file=sys.stderr)
+            print(f"Usage: status_tracker.py {CMD_SELECT_TASK} <note-id> <regions-json>", file=sys.stderr)
+            print(f"  regions-json: [[\"file\", \"passage\"], ...]", file=sys.stderr)
             sys.exit(1)
-        tracker.select_ad_hoc(sys.argv[2], sys.argv[3])
-        print(f"Ad hoc edit started in {sys.argv[2]}")
+        regions = json.loads(sys.argv[3])
+        tracker.select_task(sys.argv[2], [(r[0], r[1]) for r in regions])
+        print(f"Selected task: {sys.argv[2]} ({len(regions)} region(s))")
+    elif command == CMD_SELECT_AD_HOC:
+        if len(sys.argv) < 3:
+            print(f"Usage: status_tracker.py {CMD_SELECT_AD_HOC} <regions-json>", file=sys.stderr)
+            sys.exit(1)
+        regions = json.loads(sys.argv[2])
+        tracker.select_ad_hoc([(r[0], r[1]) for r in regions])
+        print(f"Ad hoc edit started ({len(regions)} region(s))")
     elif command == CMD_CREATE_PLAN:
         if len(sys.argv) < 3:
             print(f"Usage: status_tracker.py {CMD_CREATE_PLAN} <plan-name>", file=sys.stderr)

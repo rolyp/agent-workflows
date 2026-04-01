@@ -488,7 +488,7 @@ class CompleteTaskTest(TestFixture):
         # Add a task with proper note link
         tracker.add_task("test-1", "Fix something", "structural")
         (self.test_dir / "sec" / "test.tex").write_text("some passage\n")
-        tracker.select_task("test-1", "sec/test.tex", "some passage")
+        tracker.select_task("test-1", [("sec/test.tex", "some passage")])
         return tracker
 
     def test_complete_updates_done_count(self):
