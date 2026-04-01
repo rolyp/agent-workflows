@@ -11,9 +11,16 @@ import glob
 import json
 import re
 import sys
+from enum import Enum
 from pathlib import Path
 
-PHASES = ("idle", "selecting", "edit", "review", "closeout")
+
+class Phase(Enum):
+    IDLE = "idle"                        # No active task
+    SELECTING = "selecting"              # Phase 1: choosing next task
+    EDIT = "edit"                        # Phase 2: editing within select bars
+    AUTHOR_REVIEW = "author-review"      # Phase 3: awaiting author approval
+    CLOSEOUT = "closeout"                # Phase 4: structural close-out
 
 
 class ValidationError(Exception):
@@ -40,7 +47,7 @@ class StatusTracker:
 
         # Initialise state file if absent
         if not self.state_path.exists():
-            self._write_state("idle")
+            self._write_state(Phase.IDLE)
 
         self.assert_valid()
 
@@ -104,16 +111,15 @@ class StatusTracker:
         return errors
 
     def _state_consistent_with_markers(self) -> list[str]:
-        state = self.read_state()
-        phase = state["phase"]
+        phase = self._read_phase()
         has_select = bool(self._tex_files_containing("\\selectstart"))
         has_review = bool(self._tex_files_containing("\\reviewstart"))
         errors = []
-        if phase == "edit" and not has_select:
+        if phase is Phase.EDIT and not has_select:
             errors.append("State is 'edit' but no select bars found in .tex files")
-        if phase == "review" and not has_review:
-            errors.append("State is 'review' but no review bars found in .tex files")
-        if phase == "idle" and (has_select or has_review):
+        if phase is Phase.AUTHOR_REVIEW and not has_review:
+            errors.append("State is 'author-review' but no review bars found in .tex files")
+        if phase is Phase.IDLE and (has_select or has_review):
             errors.append("State is 'idle' but markers found in .tex files")
         return errors
 
@@ -122,17 +128,19 @@ class StatusTracker:
     def read_state(self) -> dict:
         return json.loads(self.state_path.read_text())
 
-    def _write_state(self, phase: str, task: str | None = None) -> None:
-        assert phase in PHASES, f"Invalid phase: {phase}"
-        state = {"phase": phase, "task": task}
+    def _read_phase(self) -> Phase:
+        return Phase(self.read_state()["phase"])
+
+    def _write_state(self, phase: Phase, task: str | None = None) -> None:
+        state = {"phase": phase.value, "task": task}
         self.state_path.write_text(json.dumps(state, indent=2) + "\n")
         self._update_dashboard_state(phase, task)
 
-    def _update_dashboard_state(self, phase: str, task: str | None) -> None:
+    def _update_dashboard_state(self, phase: Phase, task: str | None) -> None:
         if not self.dashboard_path.exists():
             return
         dashboard = self._read_dashboard()
-        state_line = f"**State:** {phase}" + (f" — {task}" if task else "")
+        state_line = f"**State:** {phase.value}" + (f" — {task}" if task else "")
         if re.search(r"^\*\*State:\*\*", dashboard, re.MULTILINE):
             dashboard = re.sub(
                 r"^\*\*State:\*\*.*$", state_line, dashboard, flags=re.MULTILINE
@@ -153,8 +161,8 @@ class StatusTracker:
             text = text.replace("\\selectstart", "\\reviewstart")
             text = text.replace("\\selectend", "\\reviewend")
             Path(path).write_text(text)
-        state = self.read_state()
-        self._write_state("review", state.get("task"))
+        task = self.read_state().get("task")
+        self._write_state(Phase.AUTHOR_REVIEW, task)
         self.assert_valid()
 
     def return_to_edit(self) -> None:
@@ -164,8 +172,8 @@ class StatusTracker:
             text = text.replace("\\reviewstart", "\\selectstart")
             text = text.replace("\\reviewend", "\\selectend")
             Path(path).write_text(text)
-        state = self.read_state()
-        self._write_state("edit", state.get("task"))
+        task = self.read_state().get("task")
+        self._write_state(Phase.EDIT, task)
         self.assert_valid()
 
     # --- PreToolUse gate ---
@@ -178,15 +186,14 @@ class StatusTracker:
         """
         if not file_path.endswith(".tex"):
             return True, ""
-        state = self.read_state()
-        phase = state["phase"]
-        task = state.get("task") or "unknown"
-        if phase == "review":
+        phase = self._read_phase()
+        task = self.read_state().get("task") or "unknown"
+        if phase is Phase.AUTHOR_REVIEW:
             return False, (
-                f"Cannot edit .tex files during review phase (task: {task}). "
+                f"Cannot edit .tex files during author-review phase (task: {task}). "
                 f"Run `status_tracker.py return-to-edit` first."
             )
-        if phase == "idle":
+        if phase is Phase.IDLE:
             return True, "Note: no active task. Is this an ad hoc edit?"
         return True, ""
 

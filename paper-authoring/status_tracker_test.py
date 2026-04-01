@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from status_tracker import StatusTracker, ValidationError
+from status_tracker import Phase, StatusTracker, ValidationError
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.md"
 
@@ -190,10 +190,10 @@ class StateTest(TestFixture):
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\selectstart text \\selectend\n"
         )
-        tracker._write_state("edit", "Active task")
+        tracker._write_state(Phase.EDIT, "Active task")
         tracker.begin_review()
         state = tracker.read_state()
-        self.assertEqual(state["phase"], "review")
+        self.assertEqual(state["phase"], "author-review")
 
     def test_return_to_edit_sets_edit_phase(self):
         tracker = self._make_tracker(_make_dashboard(
@@ -203,7 +203,7 @@ class StateTest(TestFixture):
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\reviewstart text \\reviewend\n"
         )
-        tracker._write_state("review", "Active task")
+        tracker._write_state(Phase.AUTHOR_REVIEW, "Active task")
         tracker.return_to_edit()
         state = tracker.read_state()
         self.assertEqual(state["phase"], "edit")
@@ -221,11 +221,11 @@ class StateTest(TestFixture):
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\selectstart text \\selectend\n"
         )
-        tracker._write_state("edit", "Task A")
+        tracker._write_state(Phase.EDIT, "Task A")
         tracker.begin_review()
         dashboard = tracker._read_dashboard()
         self.assertEqual(dashboard.count("**State:**"), 1)
-        self.assertIn("**State:** review — Task A", dashboard)
+        self.assertIn("**State:** author-review — Task A", dashboard)
 
 
 class BeginReviewTest(TestFixture):
@@ -236,7 +236,7 @@ class BeginReviewTest(TestFixture):
         ))
         tex = self.test_dir / "sec" / "test.tex"
         tex.write_text("before \\selectstart middle \\selectend after\n")
-        tracker._write_state("edit", "Active task")
+        tracker._write_state(Phase.EDIT, "Active task")
         tracker.begin_review()
         result = tex.read_text()
         self.assertIn("\\reviewstart", result)
@@ -251,7 +251,7 @@ class ReturnToEditTest(TestFixture):
         ))
         tex = self.test_dir / "sec" / "test.tex"
         tex.write_text("before \\reviewstart middle \\reviewend after\n")
-        tracker._write_state("review", "Active task")
+        tracker._write_state(Phase.AUTHOR_REVIEW, "Active task")
         tracker.return_to_edit()
         result = tex.read_text()
         self.assertIn("\\selectstart", result)
@@ -273,7 +273,7 @@ class CheckEditTest(TestFixture):
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\reviewstart text \\reviewend\n"
         )
-        tracker._write_state("review", "Some task")
+        tracker._write_state(Phase.AUTHOR_REVIEW, "Some task")
         allowed, msg = tracker.check_edit("sec/intro.tex")
         self.assertFalse(allowed)
         self.assertIn("return-to-edit", msg)
@@ -292,7 +292,7 @@ class CheckEditTest(TestFixture):
         (self.test_dir / "sec" / "test.tex").write_text(
             "\\selectstart text \\selectend\n"
         )
-        tracker._write_state("edit", "Some task")
+        tracker._write_state(Phase.EDIT, "Some task")
         allowed, msg = tracker.check_edit("sec/intro.tex")
         self.assertTrue(allowed)
         self.assertEqual(msg, "")
