@@ -57,22 +57,15 @@ State is externalised to `workflow/state.json` and reported in the dashboard. Se
 ### Automation
 
 - **Session start**: constructor runs, initialises `state.json` if absent, calls `assert_valid()`; output injected into Claude's context
-- **PreToolUse on Edit**: `check_edit()` blocks `.tex` edits during `author-review` (with actionable feedback), warns during `idle`
+- **PreToolUse on Edit**: `check_edit()` blocks `.tex` edits during `author-review` and `triage`; enforces edits are within select bars during `edit` phase; warns during `idle`
+- **PreToolUse on Write**: `check_write()` blocks overwriting existing files (use Edit instead)
 - **After every mutation**: `assert_valid()` runs automatically
-
-### Mechanical invariants (enforced by `assert_valid`)
-
-- At most one in-progress task
-- Markers must match task state
-- Select and review bars do not coexist
-- Progress counts consistent
-- State phase consistent with markers on disk
+- **Invariants**: see `assert_valid()` in `status_tracker.py`
 
 ### Editorial invariants (not mechanically enforceable)
 
-1. **Author Assistant** must not edit `.tex` content outside select bars for the current task
-2. **Approved markup outside bars is expected.** Previously approved `\added`/`\deleted`/`\replaced` markup sits outside any bars until the branch is merged — not an inconsistency
-3. **Editing outside bars means new work.** Wanting to edit a passage outside bars requires task selection (Phase 1) first
+1. **Approved markup outside bars is expected.** Previously approved `\added`/`\deleted`/`\replaced` markup sits outside any bars until the branch is merged — not an inconsistency
+2. **Editing outside bars means new work.** Wanting to edit a passage outside bars requires task selection (Phase 1) first
 
 ### Task dependencies
 

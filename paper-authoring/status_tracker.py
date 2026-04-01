@@ -15,6 +15,13 @@ from enum import Enum
 from pathlib import Path
 
 
+# LaTeX marker commands
+SELECT_START = "\\selectstart"
+SELECT_END = "\\selectend"
+REVIEW_START = "\\reviewstart"
+REVIEW_END = "\\reviewend"
+
+
 class Phase(Enum):
     IDLE = "idle"                        # No active task
     TRIAGE = "triage"                    # Reviewing structural/minor notes before editing cycle
@@ -81,15 +88,15 @@ class StatusTracker:
         if self._count_in_progress(dashboard) > 0:
             return []
         errors = []
-        if self._tex_files_containing("\\selectstart"):
-            errors.append("Orphaned \\selectstart markers but no in-progress task")
-        if self._tex_files_containing("\\reviewstart"):
-            errors.append("Orphaned \\reviewstart markers but no in-progress task")
+        if self._tex_files_containing(SELECT_START):
+            errors.append(f"Orphaned {SELECT_START} markers but no in-progress task")
+        if self._tex_files_containing(REVIEW_START):
+            errors.append(f"Orphaned {REVIEW_START} markers but no in-progress task")
         return errors
 
     def _markers_do_not_coexist(self) -> list[str]:
-        if self._tex_files_containing("\\selectstart") and self._tex_files_containing("\\reviewstart"):
-            return ["Both \\selectstart and \\reviewstart markers present — should not coexist"]
+        if self._tex_files_containing(SELECT_START) and self._tex_files_containing(REVIEW_START):
+            return [f"Both {SELECT_START} and {REVIEW_START} markers present — should not coexist"]
         return []
 
     def _progress_counts_consistent(self, dashboard: str) -> list[str]:
@@ -113,8 +120,8 @@ class StatusTracker:
 
     def _state_consistent_with_markers(self) -> list[str]:
         phase = self._read_phase()
-        has_select = bool(self._tex_files_containing("\\selectstart"))
-        has_review = bool(self._tex_files_containing("\\reviewstart"))
+        has_select = bool(self._tex_files_containing(SELECT_START))
+        has_review = bool(self._tex_files_containing(REVIEW_START))
         errors = []
         if phase is Phase.EDIT and not has_select:
             errors.append("State is 'edit' but no select bars found in .tex files")
@@ -233,10 +240,10 @@ class StatusTracker:
 
     def begin_review(self) -> None:
         """Replace select bars with review bars in .tex files."""
-        for path in self._tex_files_containing("\\selectstart"):
+        for path in self._tex_files_containing(SELECT_START):
             text = Path(path).read_text()
-            text = text.replace("\\selectstart", "\\reviewstart")
-            text = text.replace("\\selectend", "\\reviewend")
+            text = text.replace(SELECT_START, REVIEW_START)
+            text = text.replace(SELECT_END, REVIEW_END)
             Path(path).write_text(text)
         task = self.read_state().get("task")
         self._write_state(Phase.AUTHOR_REVIEW, task)
@@ -244,10 +251,10 @@ class StatusTracker:
 
     def return_to_edit(self) -> None:
         """Replace review bars with select bars in .tex files."""
-        for path in self._tex_files_containing("\\reviewstart"):
+        for path in self._tex_files_containing(REVIEW_START):
             text = Path(path).read_text()
-            text = text.replace("\\reviewstart", "\\selectstart")
-            text = text.replace("\\reviewend", "\\selectend")
+            text = text.replace(REVIEW_START, SELECT_START)
+            text = text.replace(REVIEW_END, SELECT_END)
             Path(path).write_text(text)
         task = self.read_state().get("task")
         self._write_state(Phase.EDIT, task)
@@ -255,7 +262,7 @@ class StatusTracker:
 
     # --- PreToolUse gate ---
 
-    def check_edit(self, file_path: str) -> tuple[bool, str]:
+    def check_edit(self, file_path: str, old_string: str | None = None) -> tuple[bool, str]:
         """Check whether an edit to file_path is allowed.
 
         Returns (allowed, message). If not allowed, message explains
@@ -277,9 +284,38 @@ class StatusTracker:
             )
         if phase is Phase.IDLE:
             return True, "Note: no active task. Is this an ad hoc edit?"
+        if phase is Phase.EDIT and old_string is not None:
+            full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
+            if full_path.exists():
+                content = full_path.read_text()
+                if not self._text_within_select_bars(content, old_string):
+                    return False, (
+                        f"Edit target is outside select bars in {file_path}. "
+                        f"Edits during 'edit' phase must be within {SELECT_START}/{SELECT_END}."
+                    )
+        return True, ""
+
+    def check_write(self, file_path: str) -> tuple[bool, str]:
+        """Check whether a Write to file_path is allowed.
+
+        Write is only allowed if the file does not already exist.
+        """
+        full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
+        if full_path.exists():
+            return False, (
+                f"Cannot overwrite existing file {file_path} with Write tool. "
+                f"Use Edit tool for modifications to existing files."
+            )
         return True, ""
 
     # --- Helpers ---
+
+    def _text_within_select_bars(self, content: str, text: str) -> bool:
+        """Check if text appears between select bar markers in content."""
+        regions = re.findall(
+            rf"{re.escape(SELECT_START)}(.*?){re.escape(SELECT_END)}", content, re.DOTALL
+        )
+        return any(text in region for region in regions)
 
     def _minor_issues_path(self) -> Path:
         return self.root / "workflow" / "todo" / "minor-issues.md"

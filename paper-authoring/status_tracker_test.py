@@ -284,7 +284,34 @@ class CheckEditTest(TestFixture):
         self.assertTrue(allowed)
         self.assertIn("ad hoc", msg)
 
-    def test_tex_edit_allowed_during_edit_phase(self):
+    def test_tex_edit_allowed_within_select_bars(self):
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "before \\selectstart editable text \\selectend after\n"
+        )
+        tracker._write_state(Phase.EDIT, "Some task")
+        allowed, msg = tracker.check_edit("sec/test.tex", "editable text")
+        self.assertTrue(allowed)
+        self.assertEqual(msg, "")
+
+    def test_tex_edit_blocked_outside_select_bars(self):
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            "before \\selectstart editable text \\selectend after\n"
+        )
+        tracker._write_state(Phase.EDIT, "Some task")
+        allowed, msg = tracker.check_edit("sec/test.tex", "before")
+        self.assertFalse(allowed)
+        self.assertIn("outside select bars", msg)
+
+    def test_tex_edit_without_old_string_allowed(self):
+        """When old_string is not provided, skip the select bars check."""
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
             in_progress=["🔵 Active task"],
@@ -293,9 +320,8 @@ class CheckEditTest(TestFixture):
             "\\selectstart text \\selectend\n"
         )
         tracker._write_state(Phase.EDIT, "Some task")
-        allowed, msg = tracker.check_edit("sec/intro.tex")
+        allowed, msg = tracker.check_edit("sec/test.tex")
         self.assertTrue(allowed)
-        self.assertEqual(msg, "")
 
 
 class TriageTest(TestFixture):
@@ -400,6 +426,20 @@ class AddTaskTest(TestFixture):
         dashboard = tracker._read_dashboard()
         # There should be a blank line before ### Structural
         self.assertIn("\n\n### Structural", dashboard)
+
+
+class CheckWriteTest(TestFixture):
+    def test_write_allowed_for_new_file(self):
+        tracker = self._make_tracker()
+        allowed, msg = tracker.check_write("sec/new-file.tex")
+        self.assertTrue(allowed)
+
+    def test_write_blocked_for_existing_file(self):
+        tracker = self._make_tracker()
+        (self.test_dir / "sec" / "existing.tex").write_text("content\n")
+        allowed, msg = tracker.check_write("sec/existing.tex")
+        self.assertFalse(allowed)
+        self.assertIn("Edit tool", msg)
 
 
 if __name__ == "__main__":
