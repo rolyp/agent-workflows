@@ -53,7 +53,7 @@ Sole owner of all task state and marker coherence. **Author Assistant** must inv
 
 ### Files maintained
 
-- `workflow/dashboard.md` — primary view: **In progress**, **To do** sections, progress counts (project-specific)
+- `workflow/dashboard.md` — primary view: **In progress**, **To do** sections, progress counts, links to review files (project-specific)
 - `workflow/todo/completed.md` — archive of **Done** tasks (project-specific)
 - `\selectstart`/`\selectend` and `\reviewstart`/`\reviewend` in `.tex` files
 
@@ -206,8 +206,8 @@ Maintains: inline `\todo` annotations in `.tex` files.
 
 ## Structure Reviewer
 
-- Re-read full paper in light of recent structural changes
-- Review prior criticisms in `workflow/todo/structural.md`
+- Read existing structural tasks in `workflow/todo/structural.md` and any linked documents (reviews, plans) before starting
+- Re-read full paper in light of existing tasks and recent structural changes
 - Update or remove criticisms that have been addressed
 - Add new items if structural changes have introduced new issues; each item should include a **Proposed action** (the concrete change proposed) alongside the diagnosis
 - Only invoke when confident that a significant structural change has been made
