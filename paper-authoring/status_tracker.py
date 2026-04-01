@@ -239,10 +239,66 @@ class StatusTracker:
         self._write_state(Phase.IDLE)
         self.assert_valid()
 
-    # --- Bar operations ---
+    # --- Task selection ---
+
+    AD_HOC = "Ad hoc"
+
+    def select_task(self, note_id: str, file_path: str, passage: str) -> None:
+        """Select a named task from To Do; move to In Progress; place edit bars."""
+        dashboard = self._read_dashboard()
+        # Find and remove the task line from To do
+        pattern = rf"^- .+#note-{re.escape(note_id)}\).*$"
+        match = re.search(pattern, dashboard, re.MULTILINE)
+        if not match:
+            raise ValueError(f"Task '{note_id}' not found in To do")
+        task_line = match.group(0)
+        dashboard = dashboard.replace(task_line + "\n", "")
+        # Add to In progress with 🔵
+        dashboard = dashboard.replace(
+            "## In progress\n\n(none)",
+            f"## In progress\n\n🔵 {task_line}",
+        )
+        self.dashboard_path.write_text(dashboard)
+        self._place_bars(file_path, passage, EDIT_START, EDIT_END)
+        self._write_state(Phase.EDIT, note_id)
+
+    def select_ad_hoc(self, file_path: str, passage: str) -> None:
+        """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
+        dashboard = self._read_dashboard()
+        dashboard = dashboard.replace(
+            "## In progress\n\n(none)",
+            f"## In progress\n\n🔵 {self.AD_HOC}",
+        )
+        self.dashboard_path.write_text(dashboard)
+        self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
+        self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC)
+
+    def complete_task(self) -> None:
+        """Complete the current task; remove bars and In Progress entry."""
+        state = self.read_state()
+        task = state.get("task")
+        dashboard = self._read_dashboard()
+        # Remove 🔵 line from In progress
+        dashboard = re.sub(r"^🔵 .*$\n?", "", dashboard, flags=re.MULTILINE)
+        # If In progress is now empty, restore (none)
+        dashboard = re.sub(
+            r"(## In progress\n\n)\s*\n",
+            r"\1(none)\n\n",
+            dashboard,
+        )
+        self.dashboard_path.write_text(dashboard)
+        # Remove all bars from .tex files
+        for path in (self._tex_files_containing(EDIT_START)
+                     + self._tex_files_containing(REVIEW_START)):
+            self._remove_bars(path, EDIT_START, EDIT_END)
+            self._remove_bars(path, REVIEW_START, REVIEW_END)
+        self._write_state(Phase.IDLE)
+
+    # --- Bar operations (require active task) ---
 
     def open_edit(self, file_path: str, passage: str) -> None:
         """Place edit bars around a passage in a .tex file."""
+        self._require_active_task()
         self._place_bars(file_path, passage, EDIT_START, EDIT_END)
 
     def close_edit(self, file_path: str) -> None:
@@ -251,6 +307,7 @@ class StatusTracker:
 
     def open_review(self, file_path: str, passage: str) -> None:
         """Place review bars around a passage in a .tex file."""
+        self._require_active_task()
         self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
 
     def close_review(self, file_path: str) -> None:
@@ -278,6 +335,11 @@ class StatusTracker:
         task = self.read_state().get("task")
         self._write_state(Phase.EDIT, task)
         self.assert_valid()
+
+    def _require_active_task(self) -> None:
+        phase = self._read_phase()
+        if phase is Phase.IDLE:
+            raise ValueError("No active task. Use select-task or select-ad-hoc-edit first.")
 
     def _place_bars(self, file_path: str, passage: str,
                     start: str, end: str) -> None:
@@ -310,6 +372,11 @@ class StatusTracker:
         task = self.read_state().get("task") or "unknown"
 
         # Phase-based blocks
+        if phase is Phase.IDLE:
+            return False, (
+                "No active task. Use `status_tracker.py select-task` or "
+                "`status_tracker.py select-ad-hoc-edit` first."
+            )
         if phase is Phase.TRIAGE:
             return False, (
                 "Cannot edit .tex files during triage phase. "
@@ -447,6 +514,21 @@ def main() -> None:
     elif command == "approve-triage":
         tracker.approve_triage()
         print("Triage complete; entering idle")
+    elif command == "select-task":
+        if len(sys.argv) < 5:
+            print("Usage: status_tracker.py select-task <note-id> <file_path> <passage>", file=sys.stderr)
+            sys.exit(1)
+        tracker.select_task(sys.argv[2], sys.argv[3], sys.argv[4])
+        print(f"Selected task: {sys.argv[2]}")
+    elif command == "select-ad-hoc-edit":
+        if len(sys.argv) < 4:
+            print("Usage: status_tracker.py select-ad-hoc-edit <file_path> <passage>", file=sys.stderr)
+            sys.exit(1)
+        tracker.select_ad_hoc(sys.argv[2], sys.argv[3])
+        print(f"Ad hoc edit started in {sys.argv[2]}")
+    elif command == "complete-task":
+        tracker.complete_task()
+        print("Task completed")
     elif command == "open-review":
         if len(sys.argv) < 4:
             print("Usage: status_tracker.py open-review <file_path> <passage>", file=sys.stderr)

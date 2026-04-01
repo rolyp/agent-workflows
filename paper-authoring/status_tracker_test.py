@@ -268,30 +268,49 @@ class CheckEditTest(TestFixture):
         self.assertTrue(allowed)
         self.assertEqual(msg, "")
 
-    def test_tex_edit_blocked_without_change_markup(self):
+    def test_tex_edit_blocked_in_idle(self):
         tracker = self._make_tracker()
+        allowed, msg = tracker.check_edit("sec/test.tex", None, "\\deleted{text}")
+        self.assertFalse(allowed)
+        self.assertIn("select-task", msg)
+
+    def test_tex_edit_blocked_without_change_markup(self):
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["\U0001f535 Active task"],
+        ))
         (self.test_dir / "sec" / "test.tex").write_text(
-            f"{REVIEW_START} old text {REVIEW_END}\n"
+            f"{EDIT_START} old text {EDIT_END}\n"
         )
+        tracker._write_state(Phase.EDIT, "Active task")
         allowed, msg = tracker.check_edit("sec/test.tex", "old text", "new text")
         self.assertFalse(allowed)
         self.assertIn("change markup", msg)
 
     def test_tex_edit_blocked_outside_any_bars(self):
-        tracker = self._make_tracker()
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["\U0001f535 Active task"],
+        ))
         (self.test_dir / "sec" / "test.tex").write_text("bare text\n")
+        tracker._write_state(Phase.EDIT, "Active task")
         allowed, msg = tracker.check_edit("sec/test.tex", "bare text", "\\deleted{bare text}")
         self.assertFalse(allowed)
         self.assertIn("outside change bars", msg)
 
-    def test_tex_edit_allowed_within_review_bars_idle(self):
-        """Ad hoc edit: review bars + change markup, idle phase."""
-        tracker = self._make_tracker()
+    def test_tex_edit_allowed_within_review_bars_ad_hoc(self):
+        """Ad hoc edit: review bars + change markup, author-review phase."""
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["\U0001f535 Ad hoc"],
+        ))
         (self.test_dir / "sec" / "test.tex").write_text(
             f"before {REVIEW_START} old text {REVIEW_END} after\n"
         )
+        tracker._write_state(Phase.AUTHOR_REVIEW, "Ad hoc")
+        # author-review blocks edits
         allowed, msg = tracker.check_edit("sec/test.tex", "old text", "\\deleted{old text}")
-        self.assertTrue(allowed)
+        self.assertFalse(allowed)
 
     def test_tex_edit_allowed_within_edit_bars(self):
         tracker = self._make_tracker(_make_dashboard(
