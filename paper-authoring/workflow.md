@@ -1,6 +1,6 @@
-# Agent Teams Workflow
+# Paper Authoring Workflow
 
-Workflow for advancing paper using Claude Code Agent Teams. Follow whenever agent team is started on paper. See [dashboard](../../dashboard.md) for task status and [workflow diagram](workflow-diagram.md) for visual overview.
+Follow whenever agent team is started on paper. See [dashboard](../../dashboard.md) for task status and [workflow diagram](workflow-diagram.md) for visual overview.
 
 ## Roles
 
