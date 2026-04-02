@@ -9,6 +9,7 @@ Follow whenever working on the agent-workflows submodule. Tasks tracked via [Git
 | **Developer** | — | — | Human; reviews, approves, directs |
 | **Dev Assistant** | [`dev-assistant`](skills/dev-assistant/SKILL.md) (background) | Always active | Drives implementation; orchestrates other skills |
 | **Tester** | [`/tester`](skills/tester/SKILL.md) | Inline or subagent | Runs and writes tests for workflow code |
+| **Code Reviewer** | [`/code-review`](skills/code-review/SKILL.md) | Forced at `request-review`; also ad hoc | Reviews for consolidation, code smells, fragile implementations |
 
 ---
 
