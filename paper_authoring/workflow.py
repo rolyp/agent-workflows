@@ -748,12 +748,11 @@ class PaperAuthoring(Workflow):
             raise ValueError(f"Cannot parse repo from remote URL: {url}")
         return match.group(1)
 
-    def _parse_todo_tasks(self, section: str) -> list[dict]:
+    def _parse_todo_tasks(self, dashboard: str, section: str) -> list[dict]:
         """Parse tasks from a dashboard To Do section.
 
         Returns list of {description, note_id, note_file} dicts.
         """
-        dashboard = self._read_dashboard()
         pattern = rf"^### {section}$\n\n(.*?)(?=\n### |\Z)"
         match = re.search(pattern, dashboard, re.MULTILINE | re.DOTALL)
         if not match:
@@ -808,7 +807,7 @@ class PaperAuthoring(Workflow):
         dashboard = self._read_dashboard()
 
         # Structural tasks: one issue each
-        for task in self._parse_todo_tasks("Structural"):
+        for task in self._parse_todo_tasks(dashboard, "Structural"):
             body = self._read_note_body(task["note_file"], task["note_id"])
             url = self._gh_issue_create(repo, task["description"], body)
             # Add issue link to dashboard entry
@@ -826,7 +825,7 @@ class PaperAuthoring(Workflow):
             dashboard = dashboard.replace(old_entry, new_entry, 1)
 
         # Minor tasks: single issue with checkbox list
-        minor_tasks = self._parse_todo_tasks("Minor")
+        minor_tasks = self._parse_todo_tasks(dashboard, "Minor")
         if minor_tasks:
             body_lines = [f"- [ ] {t['description']}" for t in minor_tasks]
             url = self._gh_issue_create(
