@@ -14,4 +14,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pytest
-      - run: pytest paper-authoring/status_tracker_test.py -v
+      - run: pytest paper-authoring/test.py workflow-dev/test.py -v

@@ -38,7 +38,7 @@ Configure Claude Code hooks in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 workflow/agent-workflows/paper-authoring/status_tracker.py startup"
+            "command": "python3 workflow/agent-workflows/paper-authoring/workflow.py startup"
           }
         ]
       }

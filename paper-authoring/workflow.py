@@ -25,7 +25,7 @@ REVIEW_END = "\\reviewend"
 # Change markup commands
 CHANGE_MARKUP = ("\\added", "\\deleted", "\\replaced")
 
-# Files managed exclusively by StatusTracker (block direct Edit)
+# Files managed exclusively by PaperAuthoring (block direct Edit)
 PROTECTED_FILES = ("workflow/dashboard.md", "workflow/todo/completed.md", "workflow/state.json")
 
 # CLI command names
@@ -64,7 +64,7 @@ class ValidationError(Exception):
         super().__init__(f"{len(errors)} invariant(s) violated")
 
 
-class StatusTracker:
+class PaperAuthoring:
     def __init__(self, project_root: Path):
         self.root = project_root
         self.dashboard_path = project_root / "workflow" / "dashboard.md"
@@ -599,7 +599,7 @@ class StatusTracker:
             if rel_path == protected or rel_path.endswith(protected):
                 return False, (
                     f"Cannot edit {protected} directly. "
-                    f"Use StatusTracker commands to modify workflow state."
+                    f"Use PaperAuthoring commands to modify workflow state."
                 )
 
         # .md files in workflow/plans: only during planning, only the active plan
@@ -672,7 +672,7 @@ class StatusTracker:
         """Check whether a Write to file_path is allowed.
 
         Write is only allowed if the file does not already exist.
-        Plan files can only be created by StatusTracker.
+        Plan files can only be created by PaperAuthoring.
         Only applies to files within the project root.
         """
         # Files outside project root: not our concern
@@ -689,7 +689,7 @@ class StatusTracker:
             if rel_path == protected or rel_path.endswith(protected):
                 return False, (
                     f"Cannot write {protected} directly. "
-                    f"Use StatusTracker commands."
+                    f"Use PaperAuthoring commands."
                 )
 
         # Block creating plan files directly
@@ -769,7 +769,7 @@ def main() -> None:
         command = sys.argv[1]
 
     try:
-        tracker = StatusTracker(Path.cwd())
+        tracker = PaperAuthoring(Path.cwd())
     except FileNotFoundError as e:
         print(str(e))
         sys.exit(0)  # non-fatal for hooks — project may not use workflow

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from status_tracker import StatusTracker
+from workflow import PaperAuthoring
 
 
 def main() -> None:
@@ -15,7 +15,7 @@ def main() -> None:
     if not file_path:
         return
 
-    tracker = StatusTracker(Path.cwd())
+    tracker = PaperAuthoring(Path.cwd())
     allowed, message = tracker.check_write(file_path)
 
     if not allowed:

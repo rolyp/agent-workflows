@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for StatusTracker."""
+"""Tests for PaperAuthoring."""
 
 import json
 import os
@@ -9,9 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from status_tracker import (
+from workflow import (
     CHANGE_MARKUP, EDIT_END, EDIT_START, Phase, REVIEW_END, REVIEW_START,
-    StatusTracker, ValidationError,
+    PaperAuthoring, ValidationError,
 )
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.md"
@@ -84,15 +84,15 @@ class TestFixture(unittest.TestCase):
             "# Completed\n\n## Minor\n\n## Structural\n"
         )
 
-    def _make_tracker(self, dashboard: str | None = None) -> StatusTracker:
+    def _make_tracker(self, dashboard: str | None = None) -> PaperAuthoring:
         self._write_workflow_files(dashboard)
-        return StatusTracker(self.test_dir)
+        return PaperAuthoring(self.test_dir)
 
 
 class ConstructorTest(TestFixture):
     def test_missing_workflow_files(self):
         with self.assertRaises(FileNotFoundError):
-            StatusTracker(self.test_dir)
+            PaperAuthoring(self.test_dir)
 
     def test_creates_state_file(self):
         tracker = self._make_tracker()
@@ -121,7 +121,7 @@ class ConstructorTest(TestFixture):
                 in_progress=["- 🔵 My task"],
             )
         )
-        tracker = StatusTracker(self.test_dir)
+        tracker = PaperAuthoring(self.test_dir)
         state = tracker.read_state()
         self.assertEqual(state["phase"], "edit")
         self.assertEqual(state["task"], "My task")
@@ -273,7 +273,7 @@ class CheckEditTest(TestFixture):
         tracker = self._make_tracker()
         allowed, msg = tracker.check_edit("workflow/dashboard.md")
         self.assertFalse(allowed)
-        self.assertIn("StatusTracker", msg)
+        self.assertIn("PaperAuthoring", msg)
 
     def test_tex_edit_blocked_in_idle(self):
         tracker = self._make_tracker()

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for Edit. Reads tool input from stdin, checks with StatusTracker."""
+"""PreToolUse hook for Edit. Reads tool input from stdin, checks with PaperAuthoring."""
 
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from status_tracker import StatusTracker
+from workflow import PaperAuthoring
 
 
 def main() -> None:
@@ -18,7 +18,7 @@ def main() -> None:
     if not file_path:
         return
 
-    tracker = StatusTracker(Path.cwd())
+    tracker = PaperAuthoring(Path.cwd())
     allowed, message = tracker.check_edit(file_path, old_string, new_string)
 
     if not allowed:

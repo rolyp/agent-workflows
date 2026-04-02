@@ -11,7 +11,7 @@ Follow whenever agent team is started on paper. See [dashboard](../../dashboard.
 | **Copy Editor** | Inline (default) or subagent | — | Reviews prose quality and flow |
 | **Structure Reviewer** | Foreground subagent | Blocks team lead | Assesses high-level argument |
 | **Librarian** | Inline or background teammate | — | Searches, verifies, adds bibliography entries |
-| **Status Tracker** | `status_tracker.py` + hooks | Blocks team lead | Owns all task state: dashboard, `.tex` markers, phase coherence |
+| **Status Tracker** | `workflow.py` + hooks | Blocks team lead | Owns all task state: dashboard, `.tex` markers, phase coherence |
 
 Foreground subagents and **Status Tracker** block **Author Assistant** until they return — no concurrent edits to avoid race conditions. **Librarian** can run inline for simple searches (1–2 entries) or as a background teammate for larger batches.
 
@@ -44,7 +44,7 @@ Foreground subagents and **Status Tracker** block **Author Assistant** until the
 
 ## Status Tracker
 
-Implemented in `status_tracker.py`. Sole owner of all task state and marker coherence. Invoke via CLI commands — never place or remove markers directly.
+Implemented in `workflow.py`. Sole owner of all task state and marker coherence. Invoke via CLI commands — never place or remove markers directly.
 
 ### Editorial invariants (not mechanically enforceable)
 
