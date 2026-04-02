@@ -1,6 +1,6 @@
 # Workflow Development Workflow
 
-Follow whenever working on the agent-workflows submodule. Tasks tracked via [GitHub Issues](https://github.com/rolyp/agent-workflows/issues).
+Follow whenever working on the agent-workflows submodule. See [dashboard](../dashboard.md) for current state and [GitHub Issues](https://github.com/rolyp/agent-workflows/issues) for task tracking.
 
 ## Roles
 

@@ -330,7 +330,8 @@ class PaperAuthoring(Workflow):
         self.dashboard_path.write_text(dashboard)
 
     def approve_triage(self) -> None:
-        """Exit triage, enter idle (ready for Phase 1–4 cycle)."""
+        """Exit triage, enter idle. Creates GitHub Issues for all To Do tasks."""
+        self._create_github_issues()
         self._write_state(Phase.IDLE)
 
     # --- Task selection ---
@@ -731,6 +732,122 @@ class PaperAuthoring(Workflow):
         if not match:
             return 0
         return len(re.findall(r"^- ", match.group(1), re.MULTILINE))
+
+    # --- GitHub Issues integration ---
+
+    def _get_repo(self) -> str:
+        """Detect owner/repo from git remote."""
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        url = result.stdout.strip()
+        # Handle both SSH and HTTPS formats
+        match = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
+        if not match:
+            raise ValueError(f"Cannot parse repo from remote URL: {url}")
+        return match.group(1)
+
+    def _parse_todo_tasks(self, section: str) -> list[dict]:
+        """Parse tasks from a dashboard To Do section.
+
+        Returns list of {description, note_id, note_file} dicts.
+        """
+        dashboard = self._read_dashboard()
+        pattern = rf"^### {section}$\n\n(.*?)(?=\n### |\Z)"
+        match = re.search(pattern, dashboard, re.MULTILINE | re.DOTALL)
+        if not match:
+            return []
+        content = match.group(1).strip()
+        if content == "(none)":
+            return []
+        tasks = []
+        for line in content.split("\n"):
+            m = re.match(
+                r"^- (.+?) \(\[note\]\(todo/(.*?)#note-(.*?)\)\)(.*)$", line
+            )
+            if m:
+                tasks.append({
+                    "description": m.group(1),
+                    "note_file": m.group(2),
+                    "note_id": m.group(3),
+                    "suffix": m.group(4),  # preserve any trailing text
+                })
+        return tasks
+
+    def _read_note_body(self, note_file: str, note_id: str) -> str:
+        """Read the body of a note from structural.md or minor-issues.md."""
+        path = self.root / "workflow" / "todo" / note_file
+        if not path.exists():
+            return ""
+        text = path.read_text()
+        pattern = rf"### Note {re.escape(note_id)}\n(.*?)(?=\n### |\Z)"
+        match = re.search(pattern, text, re.DOTALL)
+        return match.group(1).strip() if match else ""
+
+    def _gh_issue_create(self, repo: str, title: str, body: str) -> str:
+        """Create a GitHub issue; return its URL."""
+        result = subprocess.run(
+            ["gh", "issue", "create",
+             "--repo", repo,
+             "--title", title,
+             "--body", body],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"gh issue create failed: {result.stderr}")
+        return result.stdout.strip()
+
+    def _create_github_issues(self) -> None:
+        """Create GitHub Issues for all To Do tasks and store URLs in dashboard."""
+        try:
+            repo = self._get_repo()
+        except (ValueError, FileNotFoundError):
+            return  # no git remote; skip silently
+
+        dashboard = self._read_dashboard()
+
+        # Structural tasks: one issue each
+        for task in self._parse_todo_tasks("Structural"):
+            body = self._read_note_body(task["note_file"], task["note_id"])
+            url = self._gh_issue_create(repo, task["description"], body)
+            # Add issue link to dashboard entry
+            old_entry = (
+                f"- {task['description']} "
+                f"([note](todo/{task['note_file']}#note-{task['note_id']}))"
+                f"{task['suffix']}"
+            )
+            new_entry = (
+                f"- {task['description']} "
+                f"([note](todo/{task['note_file']}#note-{task['note_id']})) "
+                f"· [issue]({url})"
+                f"{task['suffix']}"
+            )
+            dashboard = dashboard.replace(old_entry, new_entry, 1)
+
+        # Minor tasks: single issue with checkbox list
+        minor_tasks = self._parse_todo_tasks("Minor")
+        if minor_tasks:
+            body_lines = [f"- [ ] {t['description']}" for t in minor_tasks]
+            url = self._gh_issue_create(
+                repo, "Minor issues", "\n".join(body_lines)
+            )
+            # Add issue link to each minor task entry
+            for task in minor_tasks:
+                old_entry = (
+                    f"- {task['description']} "
+                    f"([note](todo/{task['note_file']}#note-{task['note_id']}))"
+                    f"{task['suffix']}"
+                )
+                new_entry = (
+                    f"- {task['description']} "
+                    f"([note](todo/{task['note_file']}#note-{task['note_id']})) "
+                    f"· [issue]({url})"
+                    f"{task['suffix']}"
+                )
+                dashboard = dashboard.replace(old_entry, new_entry, 1)
+
+        self.dashboard_path.write_text(dashboard)
 
 
 # --- CLI entry point ---

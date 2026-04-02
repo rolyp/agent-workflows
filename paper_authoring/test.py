@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from paper_authoring.workflow import (
     CHANGE_MARKUP, EDIT_END, EDIT_START, Phase, REVIEW_END, REVIEW_START,
@@ -525,3 +526,104 @@ class SubtaskTest(TestFixture):
         dashboard = tracker._read_dashboard()
         self.assertIn("[x] Fix introduction", dashboard)
         self.assertNotIn("🔵 Fix introduction", dashboard)
+
+
+class GitHubIssuesTest(TestFixture):
+    """Tests for GitHub Issues integration in approve_triage."""
+
+    def _make_tracker_with_tasks(self):
+        """Set up tracker with structural and minor tasks in To Do."""
+        tracker = self._make_tracker()
+        # Add structural notes
+        (self.test_dir / "workflow" / "todo" / "structural.md").write_text(
+            "# Structural Review Notes\n\n"
+            "### Note s-1\n\n"
+            "Diagnosis of first issue.\n\n"
+            "**Proposed action:** Fix the first thing.\n\n"
+            "### Note s-2\n\n"
+            "Second issue diagnosis.\n"
+        )
+        (self.test_dir / "workflow" / "todo" / "minor-issues.md").write_text(
+            "# Minor Issues\n\n"
+            "### Note m-1\n\nTypo on page 3.\n\n"
+            "### Note m-2\n\nMissing citation.\n"
+        )
+        tracker.add_task("s-1", "Fix introduction argument", "structural")
+        tracker.add_task("s-2", "Restructure related work", "structural")
+        tracker.add_task("m-1", "Fix typo on page 3", "minor")
+        tracker.add_task("m-2", "Add missing citation", "minor")
+        tracker.begin_triage()
+        return tracker
+
+    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
+    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
+    def test_approve_triage_creates_structural_issues(self, mock_create, mock_repo):
+        mock_repo.return_value = "owner/repo"
+        mock_create.side_effect = [
+            "https://github.com/owner/repo/issues/1",
+            "https://github.com/owner/repo/issues/2",
+            "https://github.com/owner/repo/issues/3",  # minor batch
+        ]
+        tracker = self._make_tracker_with_tasks()
+        tracker.approve_triage()
+
+        # Two structural issues + one minor batch
+        self.assertEqual(mock_create.call_count, 3)
+
+        # First structural issue
+        args1 = mock_create.call_args_list[0]
+        self.assertEqual(args1[0][1], "Fix introduction argument")
+        self.assertIn("first issue", args1[0][2])
+
+        # Second structural issue
+        args2 = mock_create.call_args_list[1]
+        self.assertEqual(args2[0][1], "Restructure related work")
+
+        # Minor batch issue
+        args3 = mock_create.call_args_list[2]
+        self.assertEqual(args3[0][1], "Minor issues")
+        self.assertIn("- [ ] Fix typo on page 3", args3[0][2])
+        self.assertIn("- [ ] Add missing citation", args3[0][2])
+
+    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
+    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
+    def test_approve_triage_stores_urls_in_dashboard(self, mock_create, mock_repo):
+        mock_repo.return_value = "owner/repo"
+        mock_create.side_effect = [
+            "https://github.com/owner/repo/issues/1",
+            "https://github.com/owner/repo/issues/2",
+            "https://github.com/owner/repo/issues/3",
+        ]
+        tracker = self._make_tracker_with_tasks()
+        tracker.approve_triage()
+        dashboard = tracker._read_dashboard()
+
+        self.assertIn("[issue](https://github.com/owner/repo/issues/1)", dashboard)
+        self.assertIn("[issue](https://github.com/owner/repo/issues/2)", dashboard)
+        self.assertIn("[issue](https://github.com/owner/repo/issues/3)", dashboard)
+
+    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
+    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
+    def test_approve_triage_transitions_to_idle(self, mock_create, mock_repo):
+        mock_repo.return_value = "owner/repo"
+        mock_create.return_value = "https://github.com/owner/repo/issues/1"
+        tracker = self._make_tracker_with_tasks()
+        tracker.approve_triage()
+        self.assertEqual(tracker.read_state()["phase"], "idle")
+
+    def test_approve_triage_no_repo_skips_silently(self):
+        """If no git remote, triage still completes without creating issues."""
+        tracker = self._make_tracker_with_tasks()
+        # No git repo in test_dir, so _get_repo will fail
+        tracker.approve_triage()
+        self.assertEqual(tracker.read_state()["phase"], "idle")
+
+    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
+    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
+    def test_approve_triage_no_tasks_skips(self, mock_create, mock_repo):
+        """If no tasks in To Do, no issues created."""
+        mock_repo.return_value = "owner/repo"
+        tracker = self._make_tracker()
+        tracker.begin_triage()
+        tracker.approve_triage()
+        mock_create.assert_not_called()
