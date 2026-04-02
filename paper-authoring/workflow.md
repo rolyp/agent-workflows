@@ -40,11 +40,7 @@ Foreground subagents block **Author Assistant** until they return. Workflow stat
 
 ## Automation
 
-Implemented in `workflow.py`. Sole owner of all task state and marker coherence. Invoke via CLI commands — never place or remove markers directly.
-
-### Editorial invariants (not mechanically enforceable)
-
-1. **Approved markup outside bars is expected.** Previously approved `\added`/`\deleted`/`\replaced` markup sits outside any bars until the branch is merged — not an inconsistency
+**Note:** previously approved `\added`/`\deleted`/`\replaced` markup may appear outside edit/review bars — this is expected until the branch is merged.
 
 ### Task dependencies
 
@@ -96,9 +92,8 @@ The editing cycle has four phases:
 **Edit (or dismiss):**
 - If proposing to dismiss: invoke **Structure Reviewer** for alternative proposal; present rationale + feedback to author. On **Author** approval: run `complete`
 - Otherwise, read proposed resolution (if one exists)
-- Mark up changes using `\added`/`\deleted`/`\replaced`, taking care not to include unchanged text unless helpful for readability
+- Apply changes with `\added`/`\deleted`/`\replaced` markup within edit bars
 - If scope expands to new passage: run `expand-scope` before editing
-- Rebuild and perform **Copy Editor** review inline (markup validation + prose). Reserve subagent invocation for full-paper review passes only
 
 **Author review:**
 - Once **Copy Editor** approves, or after 3 iterations:
@@ -110,11 +105,9 @@ The editing cycle has four phases:
   - Structural issues: proceed to Structural close-out
 - On rejection: revert; return to Task selection
 - On **Author** requesting further changes: run `review-to-edit`; return to Edit
-- Keep `\added`/`\deleted`/`\replaced` markup until branch is merged
 
 **Collaborative shortcut:** when **Author** has been actively directing edits in the current session, they may approve and complete a subtask directly without Author review ceremony. Run `complete-collaborative`. Parent task still requires full Author review.
 
-**Invariant:** every edit to `.tex` files must pass through Edit (markup + **Copy Editor**) and Author review (review bars + **Author** approval), unless the collaborative shortcut applies. No exceptions, even for edits arising during review.
 
 **Structural close-out** (structural issues only):
 - Invoke **Copy Editor** on affected paragraphs (max 3 iterations)
