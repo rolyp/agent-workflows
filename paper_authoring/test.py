@@ -101,11 +101,6 @@ class ConstructorTest(TestFixture):
         self.assertEqual(state["phase"], "idle")
         self.assertIsNone(state["task"])
 
-    def test_writes_state_to_dashboard(self):
-        tracker = self._make_tracker()
-        dashboard = tracker._read_dashboard()
-        self.assertIn("**State:** idle", dashboard)
-
     def test_preserves_existing_state(self):
         self._write_workflow_files()
         state_path = self.test_dir / "workflow" / "state.json"
@@ -211,26 +206,6 @@ class StateTest(TestFixture):
         tracker.review_to_edit()
         state = tracker.read_state()
         self.assertEqual(state["phase"], "edit")
-
-    def test_state_reported_in_dashboard(self):
-        tracker = self._make_tracker()
-        dashboard = tracker._read_dashboard()
-        self.assertIn("**State:** idle", dashboard)
-
-    def test_state_line_updated_not_duplicated(self):
-        tracker = self._make_tracker(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
-        (self.test_dir / "sec" / "test.tex").write_text(
-            f"{EDIT_START} text {EDIT_END}\n"
-        )
-        tracker._write_state(Phase.EDIT, "Task A")
-        tracker.edit_to_review()
-        dashboard = tracker._read_dashboard()
-        self.assertEqual(dashboard.count("**State:**"), 1)
-        self.assertIn("**State:** author-review — Task A", dashboard)
-
 
 class EditToReviewTest(TestFixture):
     def test_swaps_edit_to_review(self):

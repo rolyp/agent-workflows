@@ -98,7 +98,7 @@ class PaperAuthoring(Workflow):
         if not self.state_path.exists():
             stack = [{"phase": Phase.IDLE.value, "task": None}]
             self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-            self._update_dashboard_state_from_stack()
+    
 
         # Skip validation if top of stack is a foreign phase
         if self._read_phase() is not None:
@@ -206,7 +206,7 @@ class PaperAuthoring(Workflow):
             frame["regions"] = stack[-1]["regions"]
         stack[-1] = frame
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-        self._update_dashboard_state_from_stack()
+
         self.assert_valid()
 
     def _push_state(self, phase: Phase, task: str | None = None, regions: list | None = None) -> None:
@@ -217,7 +217,7 @@ class PaperAuthoring(Workflow):
             frame["regions"] = [[f, p] for f, p in regions]
         stack.append(frame)
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-        self._update_dashboard_state_from_stack()
+
         self.assert_valid()
 
     def _pop_state(self) -> dict:
@@ -228,40 +228,9 @@ class PaperAuthoring(Workflow):
         popped = stack.pop()
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
         top = stack[-1]
-        self._update_dashboard_state_from_stack()
+
         return popped
 
-    STATE_BEGIN = "<!-- state -->"
-    STATE_END = "<!-- /state -->"
-
-    def _update_dashboard_state_from_stack(self) -> None:
-        """Render the full state stack into the dashboard."""
-        if not self.dashboard_path.exists():
-            return
-        dashboard = self._read_dashboard()
-        stack = self._read_stack()
-        # Render stack: top element as current, rest as context with ↳
-        lines = []
-        for i, frame in enumerate(reversed(stack)):
-            phase = frame["phase"]
-            task = frame.get("task")
-            entry = phase + (f" — {task}" if task else "")
-            if i == 0:
-                lines.append(f"**State:** {entry}")
-            else:
-                lines.append(f"  ↳ {entry}")
-        state_content = "\n".join(lines)
-        state_block = f"{self.STATE_BEGIN}\n{state_content}\n{self.STATE_END}"
-        if self.STATE_BEGIN in dashboard:
-            # Replace between delimiters
-            pattern = rf"{re.escape(self.STATE_BEGIN)}.*?{re.escape(self.STATE_END)}"
-            dashboard = re.sub(pattern, state_block, dashboard, flags=re.DOTALL)
-        else:
-            dashboard = dashboard.replace(
-                "# Task Dashboard\n",
-                f"# Task Dashboard\n\n{state_block}\n",
-            )
-        self.dashboard_path.write_text(dashboard)
 
     # --- Triage commands ---
 
@@ -607,7 +576,7 @@ class PaperAuthoring(Workflow):
         stack = self._read_stack()
         stack.append({"phase": phase_str, "task": task})
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-        self._update_dashboard_state_from_stack()
+
 
     def _read_phase_raw(self) -> str:
         """Read the raw phase string from the top of the stack."""
