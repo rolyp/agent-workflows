@@ -237,21 +237,21 @@ class PaperAuthoring(Workflow):
             return
         dashboard = self._read_dashboard()
         stack = self._read_stack()
-        # Render stack top-first (current state first, context below)
-        lines = []
+        # Render stack: top element as current, rest as context with ↳
+        lines = ["**State:**"]
         for i, frame in enumerate(reversed(stack)):
             phase = frame["phase"]
             task = frame.get("task")
             entry = phase + (f" — {task}" if task else "")
             if i == 0:
-                lines.append(f"**State:** {entry}  ")
+                lines.append(f"- {entry}")
             else:
-                lines.append(f"↳ {entry}  ")
+                lines.append(f"  ↳ {entry}")
         state_block = "\n".join(lines)
         if re.search(r"^\*\*State:\*\*", dashboard, re.MULTILINE):
             # Replace existing state block (may be multi-line)
             dashboard = re.sub(
-                r"^\*\*State:\*\*.*?(?=\n[^\s↳]|\Z)", state_block,
+                r"^\*\*State:\*\*.*?(?=\n[^ \-↳]|\Z)", state_block,
                 dashboard, flags=re.MULTILINE | re.DOTALL
             )
         else:
