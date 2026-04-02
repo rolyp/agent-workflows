@@ -167,6 +167,70 @@ class InvariantTest(TestFixture):
         self.assertTrue(any("count mismatch" in e for e in ctx.exception.errors))
 
 
+class StackOperationsTest(TestFixture):
+    """Direct tests for pushdown automaton stack operations."""
+
+    def test_read_state_returns_top_frame(self):
+        tracker = self._make_tracker()
+        state = tracker.read_state()
+        self.assertEqual(state["phase"], "idle")
+
+    def test_write_state_replaces_top_frame(self):
+        tracker = self._make_tracker()
+        tracker._write_state(Phase.TRIAGE)
+        state = tracker.read_state()
+        self.assertEqual(state["phase"], "triage")
+
+    def test_push_state_adds_frame(self):
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["- 🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            f"{EDIT_START} text {EDIT_END}\n"
+        )
+        tracker._write_state(Phase.EDIT, "parent-task")
+        tracker._push_state(Phase.PLANNING, "parent-task")
+        stack = tracker._read_stack()
+        self.assertEqual(len(stack), 2)
+        self.assertEqual(stack[0]["phase"], "edit")
+        self.assertEqual(stack[1]["phase"], "planning")
+
+    def test_pop_state_removes_top(self):
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["- 🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            f"{EDIT_START} text {EDIT_END}\n"
+        )
+        tracker._write_state(Phase.EDIT, "parent-task")
+        tracker._push_state(Phase.PLANNING, "parent-task")
+        popped = tracker._pop_state()
+        self.assertEqual(popped["phase"], "planning")
+        self.assertEqual(len(tracker._read_stack()), 1)
+        self.assertEqual(tracker._read_phase(), Phase.EDIT)
+
+    def test_pop_last_frame_raises(self):
+        tracker = self._make_tracker()
+        with self.assertRaises(ValueError):
+            tracker._pop_state()
+
+    def test_write_state_preserves_stack_depth(self):
+        tracker = self._make_tracker(_make_dashboard(
+            structural_tasks=["Task one", "Task two"],
+            in_progress=["- 🔵 Active task"],
+        ))
+        (self.test_dir / "sec" / "test.tex").write_text(
+            f"{EDIT_START} text {EDIT_END}\n"
+        )
+        tracker._write_state(Phase.EDIT, "parent-task")
+        tracker._push_state(Phase.PLANNING, "parent-task")
+        # write_state on a 2-deep stack should only replace top
+        tracker._write_state(Phase.PLANNING, "parent-task")
+        self.assertEqual(len(tracker._read_stack()), 2)
+
+
 class StateTest(TestFixture):
     def test_edit_to_review_sets_review_phase(self):
         tracker = self._make_tracker(_make_dashboard(
