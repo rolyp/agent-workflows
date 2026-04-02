@@ -244,9 +244,9 @@ class PaperAuthoring(Workflow):
             task = frame.get("task")
             entry = phase + (f" — {task}" if task else "")
             if i == 0:
-                lines.append(f"**State:** {entry}")
+                lines.append(f"**State:** {entry}  ")
             else:
-                lines.append(f"  ↳ {entry}")
+                lines.append(f"↳ {entry}  ")
         state_block = "\n".join(lines)
         if re.search(r"^\*\*State:\*\*", dashboard, re.MULTILINE):
             # Replace existing state block (may be multi-line)
