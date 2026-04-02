@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Tests for WorkflowDev."""
 
+import json
 import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-from workflow_dev.workflow import WorkflowDev, SUBMODULE_DIR
+from workflow_dev.workflow import WorkflowDev, Phase, RefactoringMode, _is_test_file
 
 
 class TestFixture(unittest.TestCase):
@@ -15,60 +16,235 @@ class TestFixture(unittest.TestCase):
         self.orig_dir = os.getcwd()
         self.test_dir = Path(tempfile.mkdtemp())
         os.chdir(self.test_dir)
-        # Create submodule directory structure
-        (self.test_dir / SUBMODULE_DIR / "paper_authoring").mkdir(parents=True)
-        self.wd = WorkflowDev(self.test_dir)
 
     def tearDown(self):
         os.chdir(self.orig_dir)
         shutil.rmtree(self.test_dir)
 
+    def _make_wd(self) -> WorkflowDev:
+        return WorkflowDev(self.test_dir)
+
+
+class TestIsTestFile(unittest.TestCase):
+    def test_test_prefix(self):
+        self.assertTrue(_is_test_file("test.py"))
+        self.assertTrue(_is_test_file("test_workflow.py"))
+
+    def test_test_suffix(self):
+        self.assertTrue(_is_test_file("workflow_test.py"))
+
+    def test_code_file(self):
+        self.assertFalse(_is_test_file("workflow.py"))
+        self.assertFalse(_is_test_file("base.py"))
+
+    def test_nested_path(self):
+        self.assertTrue(_is_test_file("paper_authoring/test.py"))
+        self.assertFalse(_is_test_file("paper_authoring/workflow.py"))
+
+
+class ConstructorTest(TestFixture):
+    def test_creates_state_file(self):
+        wd = self._make_wd()
+        self.assertTrue(wd.state_path.exists())
+        state = wd.read_state()
+        self.assertEqual(state["phase"], "idle")
+
+    def test_preserves_existing_state(self):
+        state_path = self.test_dir / "state.json"
+        state_path.write_text(json.dumps([{"phase": "refactoring", "task": "my-task"}]))
+        wd = self._make_wd()
+        self.assertEqual(wd.read_state()["phase"], "refactoring")
+        self.assertEqual(wd.read_state()["task"], "my-task")
+
+
+class StateTransitionTest(TestFixture):
+    def test_start_task_enters_refactoring(self):
+        wd = self._make_wd()
+        wd.start_task("extract-base")
+        state = wd.read_state()
+        self.assertEqual(state["phase"], "refactoring")
+        self.assertEqual(state["task"], "extract-base")
+        self.assertNotIn("mode", state)
+
+    def test_start_task_rejects_non_idle(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        with self.assertRaises(ValueError):
+            wd.start_task("task-2")
+
+    def test_expand_coverage(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        self.assertEqual(wd.read_state()["mode"], "expand-coverage")
+
+    def test_refactor_code(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.refactor_code()
+        self.assertEqual(wd.read_state()["mode"], "refactor-code")
+
+    def test_toggle_modes(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.refactor_code()
+        self.assertEqual(wd.read_state()["mode"], "refactor-code")
+        wd.expand_coverage()
+        self.assertEqual(wd.read_state()["mode"], "expand-coverage")
+
+    def test_back_to_refactor(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.ready_to_modify()
+        wd.back_to_refactor()
+        state = wd.read_state()
+        self.assertEqual(state["phase"], "refactoring")
+        self.assertNotIn("mode", state)  # locked again
+
+    def test_approve_returns_to_idle(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.ready_to_modify()
+        wd.request_review()
+        wd.approve()
+        self.assertEqual(wd.read_state()["phase"], "idle")
+
+    def test_feedback_returns_to_refactoring(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.ready_to_modify()
+        wd.request_review()
+        wd.feedback()
+        state = wd.read_state()
+        self.assertEqual(state["phase"], "refactoring")
+        self.assertEqual(state["task"], "task-1")
+
+    def test_invalid_transitions(self):
+        wd = self._make_wd()
+        with self.assertRaises(ValueError):
+            wd.expand_coverage()  # not in refactoring
+        with self.assertRaises(ValueError):
+            wd.ready_to_modify()  # not in refactoring
+        with self.assertRaises(ValueError):
+            wd.request_review()  # not in modifying
+        with self.assertRaises(ValueError):
+            wd.approve()  # not in review
+
 
 class CheckEditTest(TestFixture):
-    def test_submodule_file_allowed(self):
-        allowed, msg = self.wd.check_edit(f"{SUBMODULE_DIR}/paper_authoring/status_tracker.py")
+    def test_blocked_in_idle(self):
+        wd = self._make_wd()
+        allowed, msg = wd.check_edit("workflow.py")
+        self.assertFalse(allowed)
+        self.assertIn("start-task", msg)
+
+    def test_blocked_in_refactoring_no_mode(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        allowed, msg = wd.check_edit("workflow.py")
+        self.assertFalse(allowed)
+        self.assertIn("expand-coverage", msg)
+
+    def test_expand_coverage_allows_test_edit(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        allowed, msg = wd.check_edit("test.py")
         self.assertTrue(allowed)
-        self.assertEqual(msg, "")
 
-    def test_tex_file_blocked(self):
-        allowed, msg = self.wd.check_edit("sec/introduction.tex")
+    def test_expand_coverage_blocks_code_edit(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
-        self.assertIn(SUBMODULE_DIR, msg)
+        self.assertIn("refactor-code", msg)
 
-    def test_dashboard_blocked(self):
-        allowed, msg = self.wd.check_edit("workflow/dashboard.md")
+    def test_refactor_code_allows_code_edit(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.refactor_code()
+        allowed, msg = wd.check_edit("workflow.py")
+        self.assertTrue(allowed)
+
+    def test_refactor_code_blocks_test_edit(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.refactor_code()
+        allowed, msg = wd.check_edit("test.py")
         self.assertFalse(allowed)
-        self.assertIn(SUBMODULE_DIR, msg)
+        self.assertIn("expand-coverage", msg)
+
+    def test_modifying_allows_all(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.ready_to_modify()
+        allowed_code, _ = wd.check_edit("workflow.py")
+        allowed_test, _ = wd.check_edit("test.py")
+        self.assertTrue(allowed_code)
+        self.assertTrue(allowed_test)
+
+    def test_review_blocks_all(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.ready_to_modify()
+        wd.request_review()
+        allowed, msg = wd.check_edit("workflow.py")
+        self.assertFalse(allowed)
+        self.assertIn("review", msg)
 
     def test_file_outside_project_allowed(self):
-        allowed, msg = self.wd.check_edit("/Users/someone/.claude/memory/test.md")
-        self.assertTrue(allowed)
-
-    def test_absolute_submodule_path_allowed(self):
-        abs_path = str(self.test_dir / SUBMODULE_DIR / "paper_authoring" / "test.py")
-        allowed, msg = self.wd.check_edit(abs_path)
+        wd = self._make_wd()
+        allowed, msg = wd.check_edit("/Users/someone/.claude/memory/test.md")
         self.assertTrue(allowed)
 
 
 class CheckWriteTest(TestFixture):
-    def test_new_submodule_file_allowed(self):
-        allowed, msg = self.wd.check_write(f"{SUBMODULE_DIR}/paper_authoring/new_file.py")
+    def test_blocked_in_idle(self):
+        wd = self._make_wd()
+        allowed, msg = wd.check_write("new_file.py")
+        self.assertFalse(allowed)
+
+    def test_expand_coverage_allows_new_test(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        allowed, msg = wd.check_write("test_new.py")
         self.assertTrue(allowed)
 
-    def test_existing_submodule_file_blocked(self):
-        existing = self.test_dir / SUBMODULE_DIR / "paper_authoring" / "existing.py"
-        existing.write_text("content\n")
-        allowed, msg = self.wd.check_write(f"{SUBMODULE_DIR}/paper_authoring/existing.py")
+    def test_expand_coverage_blocks_new_code(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        allowed, msg = wd.check_write("new_module.py")
         self.assertFalse(allowed)
-        self.assertIn("Edit tool", msg)
 
-    def test_non_submodule_file_blocked(self):
-        allowed, msg = self.wd.check_write("sec/new_section.tex")
+    def test_modifying_allows_all(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.ready_to_modify()
+        allowed, msg = wd.check_write("new_module.py")
+        self.assertTrue(allowed)
+
+    def test_review_blocks_all(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.ready_to_modify()
+        wd.request_review()
+        allowed, msg = wd.check_write("new_file.py")
         self.assertFalse(allowed)
-        self.assertIn(SUBMODULE_DIR, msg)
 
     def test_file_outside_project_allowed(self):
-        allowed, msg = self.wd.check_write("/tmp/scratch.txt")
+        wd = self._make_wd()
+        allowed, msg = wd.check_write("/tmp/scratch.txt")
         self.assertTrue(allowed)
 
 

@@ -1,58 +1,240 @@
 #!/usr/bin/env python3
-"""WorkflowDev: manages workflow development activity within the submodule.
+"""WorkflowDev: workflow development automaton.
 
-Enforces that edits are scoped to the agent-workflows submodule directory.
+Enforces refactor-first discipline via a state machine:
+  idle → refactoring (expand-coverage | refactor-code) → modifying → review → idle
+
+State is externalised to state.json. Hooks consult phase to gate edits/writes.
 """
 
+import json
+import subprocess
 import sys
+from enum import Enum
 from pathlib import Path
+
+# Ensure parent directory is on path when run as script
+if __name__ == "__main__" or "base" not in sys.modules:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from base import Workflow
 
-# Submodule path relative to project root
-SUBMODULE_DIR = "workflow/agent-workflows"
+
+class Phase(Enum):
+    IDLE = "idle"
+    REFACTORING = "refactoring"
+    MODIFYING = "modifying"
+    REVIEW = "review"
+
+
+class RefactoringMode(Enum):
+    EXPAND_COVERAGE = "expand-coverage"
+    REFACTOR_CODE = "refactor-code"
+
+
+# CLI command names
+CMD_STARTUP = "startup"
+CMD_START_TASK = "start-task"
+CMD_EXPAND_COVERAGE = "expand-coverage"
+CMD_REFACTOR_CODE = "refactor-code"
+CMD_READY_TO_MODIFY = "ready-to-modify"
+CMD_BACK_TO_REFACTOR = "back-to-refactor"
+CMD_REQUEST_REVIEW = "request-review"
+CMD_APPROVE = "approve"
+CMD_FEEDBACK = "feedback"
+
+
+def _is_test_file(path: str) -> bool:
+    """Heuristic: file is a test file if its name starts with 'test' or contains '_test'."""
+    name = Path(path).name
+    stem = Path(path).stem
+    return name.startswith("test") or stem.endswith("_test")
 
 
 class WorkflowDev(Workflow):
     def __init__(self, project_root: Path):
         self.root = project_root
-        self.submodule_path = project_root / SUBMODULE_DIR
+        self.state_path = project_root / "state.json"
 
-    def check_edit(self, file_path: str, old_string: str | None = None, new_string: str | None = None) -> tuple[bool, str]:
-        """Check whether an edit is allowed during workflow development.
+        # Initialise state file if absent
+        if not self.state_path.exists():
+            stack = [{"phase": Phase.IDLE.value, "task": None}]
+            self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
 
-        Only files within the agent-workflows submodule are editable.
-        """
+    # --- State (pushdown automaton: stack of frames) ---
+
+    def read_state(self) -> dict:
+        return self._read_stack()[-1]
+
+    def _read_stack(self) -> list[dict]:
+        return json.loads(self.state_path.read_text())
+
+    def _read_phase(self) -> Phase:
+        return Phase(self.read_state()["phase"])
+
+    def _write_state(self, phase: Phase, task: str | None = None,
+                     mode: str | None = None) -> None:
+        """Replace the top frame of the state stack."""
+        stack = self._read_stack()
+        frame: dict[str, object] = {"phase": phase.value, "task": task}
+        if mode is not None:
+            frame["mode"] = mode
+        stack[-1] = frame
+        self._save_stack(stack)
+
+    def _save_stack(self, stack: list[dict]) -> None:
+        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+
+    # --- Commands ---
+
+    def start_task(self, task: str) -> None:
+        """Start a task; enter refactoring phase (locked until sub-mode chosen)."""
+        phase = self._read_phase()
+        if phase is not Phase.IDLE:
+            raise ValueError(f"Cannot start task: current phase is {phase.value}, expected idle")
+        self._write_state(Phase.REFACTORING, task)
+
+    def expand_coverage(self) -> None:
+        """Switch to expand-coverage mode: only test files editable."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"expand-coverage only available during refactoring (current: {phase.value})")
+        state = self.read_state()
+        self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.EXPAND_COVERAGE.value)
+
+    def refactor_code(self) -> None:
+        """Switch to refactor-code mode: only code files editable."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"refactor-code only available during refactoring (current: {phase.value})")
+        state = self.read_state()
+        self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.REFACTOR_CODE.value)
+
+    def ready_to_modify(self) -> None:
+        """Transition from refactoring to modifying. Runs tests first."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"ready-to-modify only available during refactoring (current: {phase.value})")
+        self._run_tests()
+        state = self.read_state()
+        self._write_state(Phase.MODIFYING, state.get("task"))
+
+    def back_to_refactor(self) -> None:
+        """Return from modifying to refactoring (locked)."""
+        phase = self._read_phase()
+        if phase is not Phase.MODIFYING:
+            raise ValueError(f"back-to-refactor only available during modifying (current: {phase.value})")
+        state = self.read_state()
+        self._write_state(Phase.REFACTORING, state.get("task"))
+
+    def request_review(self) -> None:
+        """Request code review. Blocks edits until approved."""
+        phase = self._read_phase()
+        if phase is not Phase.MODIFYING:
+            raise ValueError(f"request-review only available during modifying (current: {phase.value})")
+        state = self.read_state()
+        self._write_state(Phase.REVIEW, state.get("task"))
+
+    def approve(self) -> None:
+        """Approve review; return to idle."""
+        phase = self._read_phase()
+        if phase is not Phase.REVIEW:
+            raise ValueError(f"approve only available during review (current: {phase.value})")
+        self._write_state(Phase.IDLE)
+
+    def feedback(self) -> None:
+        """Review feedback; return to refactoring for fixes."""
+        phase = self._read_phase()
+        if phase is not Phase.REVIEW:
+            raise ValueError(f"feedback only available during review (current: {phase.value})")
+        state = self.read_state()
+        self._write_state(Phase.REFACTORING, state.get("task"))
+
+    # --- Hook gates ---
+
+    def check_edit(self, file_path: str, old_string: str | None = None,
+                   new_string: str | None = None) -> tuple[bool, str]:
+        """Gate edits based on current phase and refactoring mode."""
         rel_path = self._resolve(file_path)
         if rel_path is None:
             return True, ""  # outside project root
-        if rel_path.startswith(SUBMODULE_DIR):
-            return True, ""
-        return False, (
-            f"During workflow development, only files in {SUBMODULE_DIR}/ are editable. "
-            f"Attempted: {rel_path}"
-        )
+
+        phase = self._read_phase()
+        state = self.read_state()
+
+        if phase is Phase.IDLE:
+            return False, (
+                f"No active task. Use `workflow.py {CMD_START_TASK} <task>` first."
+            )
+
+        if phase is Phase.REVIEW:
+            return False, (
+                "Edits blocked during review. "
+                f"Use `workflow.py {CMD_APPROVE}` or `workflow.py {CMD_FEEDBACK}` first."
+            )
+
+        if phase is Phase.REFACTORING:
+            mode = state.get("mode")
+            if mode is None:
+                return False, (
+                    "Refactoring phase entered but no mode selected. "
+                    f"Use `workflow.py {CMD_EXPAND_COVERAGE}` or `workflow.py {CMD_REFACTOR_CODE}` first."
+                )
+            is_test = _is_test_file(rel_path)
+            if mode == RefactoringMode.EXPAND_COVERAGE.value and not is_test:
+                return False, (
+                    f"In expand-coverage mode: only test files are editable. "
+                    f"Use `workflow.py {CMD_REFACTOR_CODE}` to switch to code editing."
+                )
+            if mode == RefactoringMode.REFACTOR_CODE.value and is_test:
+                return False, (
+                    f"In refactor-code mode: only code files are editable. "
+                    f"Use `workflow.py {CMD_EXPAND_COVERAGE}` to switch to test editing."
+                )
+
+        # Phase.MODIFYING: all edits allowed
+        return True, ""
 
     def check_write(self, file_path: str) -> tuple[bool, str]:
-        """Check whether a write is allowed during workflow development.
-
-        Only new files within the agent-workflows submodule can be created.
-        """
+        """Gate file creation based on current phase and refactoring mode."""
         rel_path = self._resolve(file_path)
         if rel_path is None:
             return True, ""  # outside project root
-        if not rel_path.startswith(SUBMODULE_DIR):
+
+        phase = self._read_phase()
+        state = self.read_state()
+
+        if phase is Phase.IDLE:
             return False, (
-                f"During workflow development, only files in {SUBMODULE_DIR}/ can be created. "
-                f"Attempted: {rel_path}"
+                f"No active task. Use `workflow.py {CMD_START_TASK} <task>` first."
             )
-        full_path = self.root / rel_path
-        if full_path.exists():
+
+        if phase is Phase.REVIEW:
             return False, (
-                f"Cannot overwrite existing file {rel_path} with Write tool. "
-                f"Use Edit tool for modifications."
+                "File creation blocked during review."
             )
+
+        if phase is Phase.REFACTORING:
+            mode = state.get("mode")
+            if mode is None:
+                return False, (
+                    "Refactoring phase entered but no mode selected. "
+                    f"Use `workflow.py {CMD_EXPAND_COVERAGE}` or `workflow.py {CMD_REFACTOR_CODE}` first."
+                )
+            is_test = _is_test_file(rel_path)
+            if mode == RefactoringMode.EXPAND_COVERAGE.value and not is_test:
+                return False, (
+                    "In expand-coverage mode: only test files can be created."
+                )
+            if mode == RefactoringMode.REFACTOR_CODE.value and is_test:
+                return False, (
+                    "In refactor-code mode: only code files can be created."
+                )
+
+        # Phase.MODIFYING: all writes allowed
         return True, ""
+
+    # --- Helpers ---
 
     def _resolve(self, file_path: str) -> str | None:
         """Resolve file_path to a path relative to project root.
@@ -66,29 +248,75 @@ class WorkflowDev(Workflow):
                 return None
         return file_path
 
+    def _run_tests(self) -> None:
+        """Run pytest; raise if tests fail."""
+        result = subprocess.run(
+            ["python3", "-m", "pytest", "-q"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        # Exit code 5 = no tests collected (acceptable)
+        if result.returncode not in (0, 5):
+            raise RuntimeError(
+                f"Tests must pass before transitioning to modifying.\n"
+                f"{result.stdout}{result.stderr}"
+            )
+
+
+# --- CLI entry point ---
 
 def main() -> None:
-    if len(sys.argv) < 3:
-        print("Usage: workflow_dev.py check-edit|check-write <file_path>", file=sys.stderr)
+    if len(sys.argv) < 2:
+        command = CMD_STARTUP
+    else:
+        command = sys.argv[1]
+
+    try:
+        wd = WorkflowDev(Path.cwd())
+    except Exception as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
 
-    command = sys.argv[1]
-    file_path = sys.argv[2]
-    wd = WorkflowDev(Path.cwd())
-
-    if command == "check-edit":
-        allowed, message = wd.check_edit(file_path)
-    elif command == "check-write":
-        allowed, message = wd.check_write(file_path)
+    if command == CMD_STARTUP:
+        state = wd.read_state()
+        phase = state["phase"]
+        task = state.get("task")
+        mode = state.get("mode")
+        summary = f"Workflow state: {phase}"
+        if task:
+            summary += f" — {task}"
+        if mode:
+            summary += f" ({mode})"
+        print(summary)
+    elif command == CMD_START_TASK:
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_START_TASK} <task-name>", file=sys.stderr)
+            sys.exit(1)
+        wd.start_task(sys.argv[2])
+        print(f"Started task: {sys.argv[2]} (refactoring, locked)")
+    elif command == CMD_EXPAND_COVERAGE:
+        wd.expand_coverage()
+        print("Mode: expand-coverage (test files only)")
+    elif command == CMD_REFACTOR_CODE:
+        wd.refactor_code()
+        print("Mode: refactor-code (code files only)")
+    elif command == CMD_READY_TO_MODIFY:
+        wd.ready_to_modify()
+        print("Tests passed; entering modifying phase")
+    elif command == CMD_BACK_TO_REFACTOR:
+        wd.back_to_refactor()
+        print("Back to refactoring (locked)")
+    elif command == CMD_REQUEST_REVIEW:
+        wd.request_review()
+        print("Review requested; edits blocked")
+    elif command == CMD_APPROVE:
+        wd.approve()
+        print("Review approved; returning to idle")
+    elif command == CMD_FEEDBACK:
+        wd.feedback()
+        print("Review feedback; returning to refactoring (locked)")
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         sys.exit(1)
-
-    if not allowed:
-        print(message, file=sys.stderr)
-        sys.exit(2)
-    elif message:
-        print(message, file=sys.stderr)
 
 
 if __name__ == "__main__":
