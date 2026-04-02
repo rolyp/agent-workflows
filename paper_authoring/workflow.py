@@ -501,15 +501,50 @@ class PaperAuthoring(Workflow):
     # --- Workflow dev ---
 
     def begin_workflow_dev(self, reason: str) -> None:
-        """Push a workflow_dev frame onto the state stack."""
+        """Add workflow-dev as active child in dashboard; push state."""
+        dashboard = self._read_dashboard()
+        # Find the current 🔵 line (could be top-level or subtask)
+        active_match = re.search(r"^( *)- 🔵 (.*)$", dashboard, re.MULTILINE)
+        if not active_match:
+            raise ValueError("No active task to nest workflow-dev under")
+        indent = active_match.group(1)
+        active_content = active_match.group(2)
+        old_line = active_match.group(0)
+        # Remove 🔵 from current active, add workflow-dev child with 🔵
+        child_indent = indent + "  "
+        new_line = f"{indent}- {active_content}\n{child_indent}- 🔵 ⚙️ {reason}"
+        dashboard = dashboard.replace(old_line, new_line)
+        self.dashboard_path.write_text(dashboard)
         self._push_state_raw(WORKFLOW_DEV_PHASE, reason)
 
     def end_workflow_dev(self) -> None:
-        """Pop the workflow_dev frame."""
+        """Remove workflow-dev child from dashboard; restore parent 🔵; pop state."""
         phase = self._read_phase_raw()
         if phase != WORKFLOW_DEV_PHASE:
             raise ValueError(f"Not in workflow_dev phase (current: {phase})")
+        dashboard = self._read_dashboard()
+        # Find and remove the 🔵 ⚙️ line
+        dev_match = re.search(r"^( *)- 🔵 ⚙️ .*$", dashboard, re.MULTILINE)
+        if dev_match:
+            dashboard = dashboard.replace(dev_match.group(0) + "\n", "")
+        # Restore 🔵 to the parent (the line that was previously active)
+        # The parent is now the nearest non-indented-more-than-dev line above
+        self.dashboard_path.write_text(dashboard)
         self._pop_state()
+        # Re-read state to get the parent task and mark it active
+        state = self.read_state()
+        task = state.get("task")
+        if task:
+            dashboard = self._read_dashboard()
+            # Find the parent line (contains the task id or description)
+            parent_pattern = rf"^( *)- (.*(?:{re.escape(task)}).*)$"
+            parent_match = re.search(parent_pattern, dashboard, re.MULTILINE)
+            if parent_match:
+                old = parent_match.group(0)
+                indent = parent_match.group(1)
+                content = parent_match.group(2)
+                dashboard = dashboard.replace(old, f"{indent}- 🔵 {content}")
+                self.dashboard_path.write_text(dashboard)
         self.assert_valid()
 
     # --- Bar operations (require active task) ---
