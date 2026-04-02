@@ -797,11 +797,22 @@ class PaperAuthoring(Workflow):
             raise RuntimeError(f"gh issue create failed: {result.stderr}")
         return result.stdout.strip()
 
+    def _format_dashboard_entry(self, task: dict, issue_url: str | None = None) -> str:
+        """Format a dashboard entry line from a parsed task dict."""
+        entry = (
+            f"- {task['description']} "
+            f"([note](todo/{task['note_file']}#note-{task['note_id']}))"
+        )
+        if issue_url:
+            entry += f" · [issue]({issue_url})"
+        entry += task["suffix"]
+        return entry
+
     def _create_github_issues(self) -> None:
         """Create GitHub Issues for all To Do tasks and store URLs in dashboard."""
         try:
             repo = self._get_repo()
-        except (ValueError, FileNotFoundError):
+        except ValueError:
             return  # no git remote; skip silently
 
         dashboard = self._read_dashboard()
@@ -810,18 +821,8 @@ class PaperAuthoring(Workflow):
         for task in self._parse_todo_tasks(dashboard, "Structural"):
             body = self._read_note_body(task["note_file"], task["note_id"])
             url = self._gh_issue_create(repo, task["description"], body)
-            # Add issue link to dashboard entry
-            old_entry = (
-                f"- {task['description']} "
-                f"([note](todo/{task['note_file']}#note-{task['note_id']}))"
-                f"{task['suffix']}"
-            )
-            new_entry = (
-                f"- {task['description']} "
-                f"([note](todo/{task['note_file']}#note-{task['note_id']})) "
-                f"· [issue]({url})"
-                f"{task['suffix']}"
-            )
+            old_entry = self._format_dashboard_entry(task)
+            new_entry = self._format_dashboard_entry(task, issue_url=url)
             dashboard = dashboard.replace(old_entry, new_entry, 1)
 
         # Minor tasks: single issue with checkbox list
@@ -831,19 +832,9 @@ class PaperAuthoring(Workflow):
             url = self._gh_issue_create(
                 repo, "Minor issues", "\n".join(body_lines)
             )
-            # Add issue link to each minor task entry
             for task in minor_tasks:
-                old_entry = (
-                    f"- {task['description']} "
-                    f"([note](todo/{task['note_file']}#note-{task['note_id']}))"
-                    f"{task['suffix']}"
-                )
-                new_entry = (
-                    f"- {task['description']} "
-                    f"([note](todo/{task['note_file']}#note-{task['note_id']})) "
-                    f"· [issue]({url})"
-                    f"{task['suffix']}"
-                )
+                old_entry = self._format_dashboard_entry(task)
+                new_entry = self._format_dashboard_entry(task, issue_url=url)
                 dashboard = dashboard.replace(old_entry, new_entry, 1)
 
         self.dashboard_path.write_text(dashboard)
