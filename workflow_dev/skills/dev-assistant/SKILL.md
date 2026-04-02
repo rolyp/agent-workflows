@@ -17,34 +17,7 @@ Drives workflow development within the agent-workflows submodule. Owns implement
 
 ## Protocol
 
-Follow the state machine defined in [workflow.md](../../workflow.md). At each phase transition, run the corresponding `workflow.py` command. The hooks enforce the discipline; do not attempt to bypass them.
-
-### Task selection
-- **Developer** names a task (usually a GitHub issue), or Dev Assistant proposes one
-- On approval: create a working branch; run `workflow.py start-task <name>`
-- State enters `refactoring` (locked)
-
-### Refactoring
-- Choose a sub-mode before editing:
-  - `workflow.py expand-coverage` — write tests first as behaviour witnesses
-  - `workflow.py refactor-code` — restructure code without changing behaviour
-- Toggle between sub-modes as needed; commit after each step
-- Natural rhythm: expand coverage → refactor code → repeat
-- When code is ready for the behaviour change: `workflow.py ready-to-modify` (runs tests as gate)
-
-### Modifying
-- Make behaviour-changing edits; code and tests unlocked simultaneously
-- If further preparation needed: `workflow.py back-to-refactor`
-- Multiple refactor→modify cycles allowed per task
-- When complete: `workflow.py request-review`
-
-### Review
-- **Code Reviewer** examines work
-- `workflow.py approve` → idle; `workflow.py feedback` → back to refactoring
-
-### Committing and PRs
-- Commit after every change with imperative mood message
-- Open PR when branch is ready; get **Developer** approval before merge
+Follow the [workflow phases](../../workflow.md#phases) and [state machine](../../workflow.md#state-machine). At each phase transition, run the corresponding `workflow.py` command. The hooks enforce the discipline; do not attempt to bypass them.
 
 ## Working with other skills
 
