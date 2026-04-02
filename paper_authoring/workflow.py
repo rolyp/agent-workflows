@@ -238,6 +238,63 @@ class PaperAuthoring(Workflow):
 
         return popped
 
+    # --- Dashboard rendering ---
+
+    def _render_in_progress(self) -> str:
+        """Render the In Progress section from the state stack."""
+        stack = self._read_stack()
+        if not stack or stack[0].get("phase") == Phase.IDLE.value:
+            return "(none)"
+        # Bottom frame is the root task
+        root = stack[0]
+        lines = []
+        # Determine if root is the active leaf (no children on stack)
+        root_is_leaf = len(stack) == 1
+        prefix = "🔵 " if root_is_leaf else ""
+        # Render root task line
+        desc = root.get("description", root.get("task", "unknown"))
+        note_link = root.get("note_link")
+        plan_link = root.get("plan_link")
+        line = f"- {prefix}{desc}"
+        if note_link:
+            line += f" ([note]({note_link}))"
+        if plan_link:
+            line += f" · [plan]({plan_link})"
+        lines.append(line)
+        # Render subtasks
+        subtasks = root.get("subtasks", [])
+        for st in subtasks:
+            # Check if this subtask is active (appears on the stack)
+            st_is_active = any(
+                f.get("task") == st["id"] for f in stack[1:]
+            )
+            st_prefix = "🔵 " if st_is_active and len(stack) == 2 else ""
+            lines.append(f"  - {st_prefix}{st['description']} (subtask: {st['id']})")
+        # Render pushed frames (workflow-dev etc.) as children
+        for frame in stack[1:]:
+            phase = frame.get("phase", "")
+            if phase == WORKFLOW_DEV_PHASE:
+                desc = frame.get("description", frame.get("task", ""))
+                is_leaf = frame is stack[-1]
+                prefix = "🔵 " if is_leaf else ""
+                lines.append(f"  - {prefix}⚙️ {desc}")
+            elif phase == Phase.PLANNING.value:
+                pass  # planning is a substate, not a visible child
+        return "\n".join(lines)
+
+    def _update_in_progress(self) -> None:
+        """Regenerate the In Progress section of the dashboard from state."""
+        if not self.dashboard_path.exists():
+            return
+        dashboard = self._read_dashboard()
+        rendered = self._render_in_progress()
+        # Replace the In Progress section
+        dashboard = re.sub(
+            r"(## In progress\n\n).*?(?=\n## )",
+            f"\\1{rendered}\n",
+            dashboard, flags=re.DOTALL,
+        )
+        self.dashboard_path.write_text(dashboard)
 
     # --- Triage commands ---
 
