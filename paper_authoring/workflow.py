@@ -100,7 +100,8 @@ class PaperAuthoring(Workflow):
             self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
     
 
-        # Skip validation if top of stack is a foreign phase
+        # Ensure dashboard reflects current state
+        self._update_in_progress()
         if self._read_phase() is not None:
             self.assert_valid()
 
