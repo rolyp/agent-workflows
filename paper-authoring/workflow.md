@@ -11,9 +11,10 @@ Follow whenever agent team is started on paper. See [dashboard](../../dashboard.
 | **Copy Editor** | Inline (default) or subagent | — | Reviews prose quality and flow |
 | **Structure Reviewer** | Foreground subagent | Blocks team lead | Assesses high-level argument |
 | **Librarian** | Inline or background teammate | — | Searches, verifies, adds bibliography entries |
-| **Status Tracker** | `workflow.py` + hooks | Blocks team lead | Owns all task state: dashboard, `.tex` markers, phase coherence |
 
-Foreground subagents and **Status Tracker** block **Author Assistant** until they return — no concurrent edits to avoid race conditions. **Librarian** can run inline for simple searches (1–2 entries) or as a background teammate for larger batches.
+Foreground subagents block **Author Assistant** until they return — no concurrent edits to avoid race conditions. **Librarian** can run inline for simple searches (1–2 entries) or as a background teammate for larger batches.
+
+Workflow state and invariants are enforced by `PaperAuthoring` (`workflow.py`) via hooks — not a role, but the implementation of this workflow as a pushdown automaton.
 
 ---
 
@@ -30,7 +31,7 @@ Foreground subagents and **Status Tracker** block **Author Assistant** until the
 - **Opus**: **Structure Reviewer** assessments; collaborative work with **Author** on structural issues (drafting new paragraphs, rethinking argument)
 - **Sonnet**: everything else (edits, commits, file ops, inline copy-editing)
 - Subagents/teammates must always set `model` explicitly:
-  - `model: "sonnet"` — **Librarian**, **Status Tracker**, **Copy Editor** (full-paper review)
+  - `model: "sonnet"` — **Librarian**, **Copy Editor** (full-paper review)
   - `model: "opus"` — **Structure Reviewer**
 
 ### Branching and commits
@@ -42,7 +43,7 @@ Foreground subagents and **Status Tracker** block **Author Assistant** until the
 
 ---
 
-## Status Tracker
+## Automation
 
 Implemented in `workflow.py`. Sole owner of all task state and marker coherence. Invoke via CLI commands — never place or remove markers directly.
 
@@ -89,14 +90,14 @@ For a paper (pre-existing or authored using this workflow) that has received ext
 
 ## Author Assistant
 
-Drives the editing process. Owns paper content (`\added`/`\deleted`/`\replaced` markup and prose) but delegates all marker and task-state changes to **Status Tracker**.
+Drives the editing process. Owns paper content (`\added`/`\deleted`/`\replaced` markup and prose) but delegates all marker and task-state changes to `PaperAuthoring`.
 
 ### Ad hoc edits
 
 **Author** may direct a specific, bounded change to any passage at any time, outside the phase system:
 - **Author Assistant** applies `\added`/`\deleted`/`\replaced` markup
 - **Author Assistant** uses `open-review` to place review bars, applies markup, **Author** reviews
-- No **Status Tracker** task involvement
+- No `PaperAuthoring` task involvement
 - **Author** reviews proposed change before commit
 - If edit turns out to need broader investigation or touches multiple passages, escalate to a task
 
@@ -106,30 +107,30 @@ Works in four phases:
 
 **Task selection:**
 - Either **Author** names a task directly (constitutes both identification and approval), or **Author Assistant** identifies a candidate from dashboard **To do** (prioritising low-risk/small-scope edits) and presents to **Author** for approval
-- On approval: invoke **Status Tracker** → `select`; proceed to Edit
+- On approval: run `select`; proceed to Edit
 - If **Author** redirects: select another candidate, repeat
 - **Author** may also bump a minor issue to structural
 
 **Edit (or dismiss):**
-- If proposing to dismiss: invoke **Structure Reviewer** for alternative proposal; present rationale + feedback to author. On **Author** approval: invoke **Status Tracker** → `complete`
+- If proposing to dismiss: invoke **Structure Reviewer** for alternative proposal; present rationale + feedback to author. On **Author** approval: run `complete`
 - Otherwise, read proposed resolution (if one exists)
 - Mark up changes using `\added`/`\deleted`/`\replaced`, taking care not to include unchanged text unless helpful for readability
-- If scope expands to new passage: invoke **Status Tracker** → `expand-scope` before editing
+- If scope expands to new passage: run `expand-scope` before editing
 - Rebuild and perform **Copy Editor** review inline (markup validation + prose). Reserve subagent invocation for full-paper review passes only
 
 **Author review:**
 - Once **Copy Editor** approves, or after 3 iterations:
-  - Invoke **Status Tracker** → `edit-to-review`; present to **Author**
+  - Run `edit-to-review`; present to **Author**
   - If max iterations exceeded: note **Copy Editor** concerns remain
 - Do NOT commit until **Author** explicitly approves
-- On approval: commit; invoke **Status Tracker** → `complete`
+- On approval: commit; run `complete`
   - Minor issues: return to Task selection
   - Structural issues: proceed to Structural close-out
 - On rejection: revert; return to Task selection
-- On **Author** requesting further changes: invoke **Status Tracker** → `review-to-edit`; return to Edit
+- On **Author** requesting further changes: run `review-to-edit`; return to Edit
 - Keep `\added`/`\deleted`/`\replaced` markup until branch is merged
 
-**Collaborative shortcut:** when **Author** has been actively directing edits in the current session, they may approve and complete a subtask directly without Author review ceremony. Invoke **Status Tracker** → `complete-collaborative`. Parent task still requires full Author review.
+**Collaborative shortcut:** when **Author** has been actively directing edits in the current session, they may approve and complete a subtask directly without Author review ceremony. Run `complete-collaborative`. Parent task still requires full Author review.
 
 **Invariant:** every edit to `.tex` files must pass through Edit (markup + **Copy Editor**) and Author review (review bars + **Author** approval), unless the collaborative shortcut applies. No exceptions, even for edits arising during review.
 
@@ -137,10 +138,10 @@ Works in four phases:
 - Invoke **Copy Editor** on affected paragraphs (max 3 iterations)
 - If **Copy Editor** fails to approve: return to **Author**
 - If **Copy Editor** approves: invoke **Structure Reviewer** to confirm resolution and update `workflow/todo/structural.md`
-- If **Structure Reviewer** confirms: invoke **Status Tracker** → `complete-tree`; return to Task selection
-- If **Structure Reviewer** flags new issues: invoke **Status Tracker** → `add`; return to Task selection
+- If **Structure Reviewer** confirms: run `complete-tree`; return to Task selection
+- If **Structure Reviewer** flags new issues: run `add`; return to Task selection
 
-Maintains: `.tex` files (paper content only — markers managed by **Status Tracker**).
+Maintains: `.tex` files (paper content only — markers managed by `PaperAuthoring`).
 
 ---
 
