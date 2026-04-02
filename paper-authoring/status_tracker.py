@@ -585,13 +585,14 @@ class StatusTracker:
         state = self.read_state()
         task = state.get("task") or "unknown"
 
-        # Resolve relative path for comparison
-        rel_path = file_path
+        # Files outside project root: not our concern
         if Path(file_path).is_absolute():
             try:
                 rel_path = str(Path(file_path).relative_to(self.root))
             except ValueError:
-                pass
+                return True, ""
+        else:
+            rel_path = file_path
 
         # Protected files: never editable directly
         for protected in PROTECTED_FILES:
@@ -672,13 +673,16 @@ class StatusTracker:
 
         Write is only allowed if the file does not already exist.
         Plan files can only be created by StatusTracker.
+        Only applies to files within the project root.
         """
-        rel_path = file_path
+        # Files outside project root: not our concern
         if Path(file_path).is_absolute():
             try:
                 rel_path = str(Path(file_path).relative_to(self.root))
             except ValueError:
-                pass
+                return True, ""
+        else:
+            rel_path = file_path
 
         # Block writing to protected files
         for protected in PROTECTED_FILES:
