@@ -4,17 +4,15 @@ Follow whenever agent team is started on paper. See [dashboard](../../dashboard.
 
 ## Roles
 
-| Role | Type | Concurrency | Responsibility |
-|------|------|-------------|----------------|
-| **Author** | Human | — | Reviews and approves changes |
-| **Author Assistant** | Team lead | Always active | Drives editing process; interacts with **Author** |
-| **Copy Editor** | Inline (default) or subagent | — | Reviews prose quality and flow |
-| **Structure Reviewer** | Foreground subagent | Blocks team lead | Assesses high-level argument |
-| **Librarian** | Inline or background teammate | — | Searches, verifies, adds bibliography entries |
+| Role | Skill | Invocation | Responsibility |
+|------|-------|------------|----------------|
+| **Author** | — | — | Human; reviews and approves changes |
+| **Author Assistant** | [`author-assistant`](skills/author-assistant/SKILL.md) (background) | Always active | Drives editing process; orchestrates other skills |
+| **Copy Editor** | [`/copy-edit`](skills/copy-edit/SKILL.md) | Inline or subagent | Reviews prose quality and change markup |
+| **Structure Reviewer** | [`/structure-review`](skills/structure-review/SKILL.md) | Foreground subagent | Assesses high-level argument |
+| **Librarian** | [`/librarian`](skills/librarian/SKILL.md) | Inline or background | Searches, verifies, adds bibliography entries |
 
-Foreground subagents block **Author Assistant** until they return — no concurrent edits to avoid race conditions. **Librarian** can run inline for simple searches (1–2 entries) or as a background teammate for larger batches.
-
-Workflow state and invariants are enforced by `PaperAuthoring` (`workflow.py`) via hooks — not a role, but the implementation of this workflow as a pushdown automaton.
+Foreground subagents block **Author Assistant** until they return. Workflow state and invariants are enforced by `PaperAuthoring` (`workflow.py`) via hooks.
 
 ---
 
@@ -85,22 +83,9 @@ For a paper (pre-existing or authored using this workflow) that has received ext
 
 ---
 
-## Author Assistant
+## Phases
 
-Drives the editing process. Owns paper content (`\added`/`\deleted`/`\replaced` markup and prose) but delegates all marker and task-state changes to `PaperAuthoring`.
-
-### Ad hoc edits
-
-**Author** may direct a specific, bounded change to any passage at any time, outside the phase system:
-- **Author Assistant** applies `\added`/`\deleted`/`\replaced` markup
-- **Author Assistant** uses `open-review` to place review bars, applies markup, **Author** reviews
-- No `PaperAuthoring` task involvement
-- **Author** reviews proposed change before commit
-- If edit turns out to need broader investigation or touches multiple passages, escalate to a task
-
-### Phases
-
-Works in four phases:
+The editing cycle has four phases:
 
 **Task selection:**
 - Either **Author** names a task directly (constitutes both identification and approval), or **Author Assistant** identifies a candidate from dashboard **To do** (prioritising low-risk/small-scope edits) and presents to **Author** for approval
@@ -137,19 +122,3 @@ Works in four phases:
 - If **Copy Editor** approves: invoke **Structure Reviewer** to confirm resolution and update `workflow/todo/structural.md`
 - If **Structure Reviewer** confirms: run `complete-tree`; return to Task selection
 - If **Structure Reviewer** flags new issues: run `add`; return to Task selection
-
-Maintains: `.tex` files (paper content only — markers managed by `PaperAuthoring`).
-
----
-
-## Skills
-
-Role-specific behaviour is defined as [Claude Code Skills](skills/):
-
-| Skill | Role | Invocation |
-|-------|------|------------|
-| [`/copy-edit`](skills/copy-edit/SKILL.md) | Copy Editor | Inline (default) or subagent for full-paper review |
-| [`/structure-review`](skills/structure-review/SKILL.md) | Structure Reviewer | Foreground subagent |
-| [`/librarian`](skills/librarian/SKILL.md) | Librarian | Inline or background |
-
-See each skill's `SKILL.md` for detailed instructions. The workflow below specifies *when* each skill is invoked.
