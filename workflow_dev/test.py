@@ -146,6 +146,55 @@ class StateTransitionTest(TestFixture):
         self.assertEqual(state["phase"], "refactoring")
         self.assertEqual(state["task"], "task-1")
 
+    def test_begin_step_pushes_frame(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.refactor_code()
+        wd.begin_step("fix-import")
+        state = wd.read_state()
+        self.assertEqual(state["step"], "fix-import")
+        self.assertEqual(state["phase"], "refactoring")
+
+    def test_end_step_pops_frame(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.refactor_code()
+        wd.begin_step("fix-import")
+        wd.end_step()
+        state = wd.read_state()
+        self.assertNotIn("step", state)
+        self.assertEqual(state["phase"], "refactoring")
+
+    def test_cannot_nest_steps(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.refactor_code()
+        wd.begin_step("step-1")
+        with self.assertRaises(ValueError):
+            wd.begin_step("step-2")
+
+    def test_cannot_request_review_during_step(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.refactor_code()
+        wd.begin_step("step-1")
+        with self.assertRaises(ValueError):
+            wd.request_review()
+
+    def test_end_step_without_begin_raises(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.refactor_code()
+        with self.assertRaises(ValueError):
+            wd.end_step()
+
+    def test_step_preserves_mode(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.begin_step("add-tests")
+        self.assertEqual(wd.read_state()["mode"], "expand-coverage")
+
     def test_invalid_transitions(self):
         wd = self._make_wd()
         with self.assertRaises(ValueError):

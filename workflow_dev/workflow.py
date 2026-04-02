@@ -37,6 +37,8 @@ CMD_STARTUP = "startup"
 CMD_START_TASK = "start-task"
 CMD_EXPAND_COVERAGE = "expand-coverage"
 CMD_REFACTOR_CODE = "refactor-code"
+CMD_BEGIN_STEP = "begin-step"
+CMD_END_STEP = "end-step"
 CMD_BACK_TO_REFACTOR = "back-to-refactor"
 CMD_REQUEST_REVIEW = "request-review"
 CMD_APPROVE = "approve"
@@ -69,6 +71,7 @@ class WorkflowDev(Workflow):
         phase = state["phase"]
         task = state.get("task")
         mode = state.get("mode")
+        step = state.get("step")
         review_of = state.get("review_of")
         if phase == Phase.IDLE.value:
             return "(idle)"
@@ -77,6 +80,8 @@ class WorkflowDev(Workflow):
             parts.append(f"task: {task}")
         if mode:
             parts.append(f"mode: {mode}")
+        if step:
+            parts.append(f"step: {step}")
         if review_of:
             parts.append(f"reviewing: {review_of}")
         return " · ".join(parts)
@@ -125,6 +130,30 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.REFACTOR_CODE.value)
 
+    def begin_step(self, name: str) -> None:
+        """Begin a named refactoring step. Pushes a frame; enforces single-step focus."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"begin-step only available during refactoring (current: {phase.value})")
+        stack = self._read_stack()
+        if len(stack) > 1:
+            current_step = stack[-1].get("step")
+            raise ValueError(f"Already in step '{current_step}'. Run `end-step` first.")
+        state = self.read_state()
+        self._push_state(Phase.REFACTORING, state.get("task"), step=name,
+                         mode=state.get("mode"))
+
+    def end_step(self) -> None:
+        """End the current refactoring step. Runs tests, pops the frame."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"end-step only available during refactoring (current: {phase.value})")
+        stack = self._read_stack()
+        if len(stack) <= 1:
+            raise ValueError("No step in progress. Use `begin-step <name>` first.")
+        self._run_tests()
+        self._pop_state()
+
     def back_to_refactor(self) -> None:
         """Return from modifying to refactoring (locked)."""
         phase = self._read_phase()
@@ -138,6 +167,10 @@ class WorkflowDev(Workflow):
         phase = self._read_phase()
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"request-review only available during refactoring or modifying (current: {phase.value})")
+        stack = self._read_stack()
+        if len(stack) > 1:
+            current_step = stack[-1].get("step")
+            raise ValueError(f"Step '{current_step}' still in progress. Run `end-step` first.")
         self._run_tests()
         state = self.read_state()
         self._write_state(Phase.REVIEW, state.get("task"), review_of=phase.value)
@@ -298,6 +331,15 @@ def main() -> None:
     elif command == CMD_REFACTOR_CODE:
         wd.refactor_code()
         print("Mode: refactor-code (code files only)")
+    elif command == CMD_BEGIN_STEP:
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_BEGIN_STEP} <step-name>", file=sys.stderr)
+            sys.exit(1)
+        wd.begin_step(sys.argv[2])
+        print(f"Started step: {sys.argv[2]}")
+    elif command == CMD_END_STEP:
+        wd.end_step()
+        print("Step complete; tests passed")
     elif command == CMD_BACK_TO_REFACTOR:
         wd.back_to_refactor()
         print("Back to refactoring (locked)")

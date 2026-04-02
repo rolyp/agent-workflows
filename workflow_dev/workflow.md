@@ -103,6 +103,7 @@ idle ──start-task──► refactoring (locked)
 - Iterative: decompose into small steps, commit after each
 - Toggle between `expand-coverage` (tests) and `refactor-code` (code)
 - Natural rhythm: write tests first, then refactor
+- Adding new backwards-compatible behaviour is refactoring (new commands, new code paths, new functions — as long as existing tests pass unchanged). Only changes that alter existing behaviour require the modifying phase
 - When refactoring is complete: `request-review` (runs tests, then **Code Reviewer** must approve before modifying)
 
 ### Modifying
