@@ -28,11 +28,8 @@ Workflow state and invariants are enforced by `PaperAuthoring` (`workflow.py`) v
 
 ### Model usage
 - Default to **Sonnet** for routine work; prompt **Author** to switch (`/model sonnet`) when transitioning from structural to routine work, and vice versa (`/model opus`)
-- **Opus**: **Structure Reviewer** assessments; collaborative work with **Author** on structural issues (drafting new paragraphs, rethinking argument)
-- **Sonnet**: everything else (edits, commits, file ops, inline copy-editing)
-- Subagents/teammates must always set `model` explicitly:
-  - `model: "sonnet"` — **Librarian**, **Copy Editor** (full-paper review)
-  - `model: "opus"` — **Structure Reviewer**
+- **Opus**: collaborative work with **Author** on structural issues (drafting new paragraphs, rethinking argument)
+- Per-role model settings are specified in each skill's `SKILL.md` frontmatter
 
 ### Branching and commits
 - Always work on a branch, never directly on `main`; related tasks can share a working branch
@@ -145,47 +142,14 @@ Maintains: `.tex` files (paper content only — markers managed by `PaperAuthori
 
 ---
 
-## Copy Editor
+## Skills
 
-Two modes:
+Role-specific behaviour is defined as [Claude Code Skills](skills/):
 
-**Inline review** (default, after each edit):
-- Performed by **Author Assistant** directly — no subagent spawned
-- **Validate markup:**
-  - Change markup should be minimal — e.g. "Yet X" → "While Y, X" should be `\replaced{While Y,}{Yet} X`, not `\replaced{While Y, X}{Yet X}`
-  - Exception: sometimes useful to include unchanged words to avoid markup becoming too fragmentary (and thus hard to read)
-  - Prefer `\deleted` or `\added` over `\replaced` when only inserting or removing; prefer `\replaced` over separate `\added`/`\deleted` when one piece of text substitutes for another
-  - For each `\replaced`, check whether unchanged text could be factored out
-  - Markup should align to word boundaries — e.g. `\replaced{T}{So t}he` is wrong; prefer `\replaced{The}{So the}`
-  - Preserve formatting (e.g. `\emph`)
-- Review prose: check flow, redundancy, unclear antecedents, tone shifts
+| Skill | Role | Invocation |
+|-------|------|------------|
+| [`/copy-edit`](skills/copy-edit/SKILL.md) | Copy Editor | Inline (default) or subagent for full-paper review |
+| [`/structure-review`](skills/structure-review/SKILL.md) | Structure Reviewer | Foreground subagent |
+| [`/librarian`](skills/librarian/SKILL.md) | Librarian | Inline or background |
 
-**Full-paper review** (on demand, subagent):
-- Spawned as subagent; reads full paper; reviews for low-level textual issues throughout
-- Insert `\todo` annotations directly into `.tex` files at each issue found
-
-Maintains: inline `\todo` annotations in `.tex` files.
-
----
-
-## Structure Reviewer
-
-- Read existing structural tasks in `workflow/todo/structural.md` and any linked documents (reviews, plans) before starting
-- Re-read full paper in light of existing tasks and recent structural changes
-- Update or remove criticisms that have been addressed
-- Add new items if structural changes have introduced new issues; each item should include a **Proposed action** (the concrete change proposed) alongside the diagnosis
-
-Maintains: `workflow/todo/structural.md` (authoritative source for both diagnosis and proposed action).
-
----
-
-## Librarian
-
-- Search existing `.bib` files for entries
-- When not found: search online, verify DOI is genuine (not hallucinated)
-- Add verified entries to a staging `.bib` file in standard BibTeX format
-- Commit alongside edit that first cites entry
-- After author imports into Zotero and re-exports primary `.bib`, clear staging file (leave comment header)
-- Never fabricate citations — if paper cannot be found, report back rather than guessing
-
-Maintains: staging `.bib` file.
+See each skill's `SKILL.md` for detailed instructions. The workflow below specifies *when* each skill is invoked.
