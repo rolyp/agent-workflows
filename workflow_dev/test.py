@@ -97,30 +97,53 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
-        wd.ready_to_modify()
+        wd.request_review()
+        wd.approve()  # review of refactoring → modifying
         wd.back_to_refactor()
         state = wd.read_state()
         self.assertEqual(state["phase"], "refactoring")
         self.assertNotIn("mode", state)  # locked again
 
-    def test_approve_returns_to_idle(self):
+    def test_review_of_refactoring_approves_to_modifying(self):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
-        wd.ready_to_modify()
         wd.request_review()
+        self.assertEqual(wd.read_state()["review_of"], "refactoring")
+        wd.approve()
+        self.assertEqual(wd.read_state()["phase"], "modifying")
+
+    def test_review_of_modifying_approves_to_idle(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.request_review()
+        wd.approve()  # → modifying
+        wd.request_review()
+        self.assertEqual(wd.read_state()["review_of"], "modifying")
         wd.approve()
         self.assertEqual(wd.read_state()["phase"], "idle")
 
-    def test_feedback_returns_to_refactoring(self):
+    def test_feedback_on_refactoring_review_returns_to_refactoring(self):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
-        wd.ready_to_modify()
         wd.request_review()
         wd.feedback()
         state = wd.read_state()
         self.assertEqual(state["phase"], "refactoring")
+        self.assertEqual(state["task"], "task-1")
+
+    def test_feedback_on_modifying_review_returns_to_modifying(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.request_review()
+        wd.approve()  # → modifying
+        wd.request_review()
+        wd.feedback()
+        state = wd.read_state()
+        self.assertEqual(state["phase"], "modifying")
         self.assertEqual(state["task"], "task-1")
 
     def test_invalid_transitions(self):
@@ -128,9 +151,7 @@ class StateTransitionTest(TestFixture):
         with self.assertRaises(ValueError):
             wd.expand_coverage()  # not in refactoring
         with self.assertRaises(ValueError):
-            wd.ready_to_modify()  # not in refactoring
-        with self.assertRaises(ValueError):
-            wd.request_review()  # not in modifying
+            wd.request_review()  # not in refactoring or modifying
         with self.assertRaises(ValueError):
             wd.approve()  # not in review
 
@@ -183,7 +204,8 @@ class CheckEditTest(TestFixture):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
-        wd.ready_to_modify()
+        wd.request_review()
+        wd.approve()
         allowed_code, _ = wd.check_edit("workflow.py")
         allowed_test, _ = wd.check_edit("test.py")
         self.assertTrue(allowed_code)
@@ -193,7 +215,8 @@ class CheckEditTest(TestFixture):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
-        wd.ready_to_modify()
+        wd.request_review()
+        wd.approve()
         wd.request_review()
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
@@ -229,7 +252,8 @@ class CheckWriteTest(TestFixture):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
-        wd.ready_to_modify()
+        wd.request_review()
+        wd.approve()
         allowed, msg = wd.check_write("new_module.py")
         self.assertTrue(allowed)
 
@@ -237,7 +261,8 @@ class CheckWriteTest(TestFixture):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
-        wd.ready_to_modify()
+        wd.request_review()
+        wd.approve()
         wd.request_review()
         allowed, msg = wd.check_write("new_file.py")
         self.assertFalse(allowed)

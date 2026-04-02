@@ -2,8 +2,9 @@
 """WorkflowDev: workflow development automaton.
 
 Enforces refactor-first discipline via a state machine:
-  idle → refactoring (expand-coverage | refactor-code) → modifying → review → idle
+  idle → refactoring → review → modifying → review → idle
 
+Review is mandatory at both transitions: refactoring→modifying and modifying→idle.
 State is externalised to state.json. Hooks consult phase to gate edits/writes.
 """
 
@@ -36,7 +37,6 @@ CMD_STARTUP = "startup"
 CMD_START_TASK = "start-task"
 CMD_EXPAND_COVERAGE = "expand-coverage"
 CMD_REFACTOR_CODE = "refactor-code"
-CMD_READY_TO_MODIFY = "ready-to-modify"
 CMD_BACK_TO_REFACTOR = "back-to-refactor"
 CMD_REQUEST_REVIEW = "request-review"
 CMD_APPROVE = "approve"
@@ -69,6 +69,7 @@ class WorkflowDev(Workflow):
         phase = state["phase"]
         task = state.get("task")
         mode = state.get("mode")
+        review_of = state.get("review_of")
         if phase == Phase.IDLE.value:
             return "(idle)"
         parts = [f"**{phase}**"]
@@ -76,6 +77,8 @@ class WorkflowDev(Workflow):
             parts.append(f"task: {task}")
         if mode:
             parts.append(f"mode: {mode}")
+        if review_of:
+            parts.append(f"reviewing: {review_of}")
         return " · ".join(parts)
 
     def _update_dashboard(self) -> None:
@@ -122,15 +125,6 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.REFACTOR_CODE.value)
 
-    def ready_to_modify(self) -> None:
-        """Transition from refactoring to modifying. Runs tests first."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"ready-to-modify only available during refactoring (current: {phase.value})")
-        self._run_tests()
-        state = self.read_state()
-        self._write_state(Phase.MODIFYING, state.get("task"))
-
     def back_to_refactor(self) -> None:
         """Return from modifying to refactoring (locked)."""
         phase = self._read_phase()
@@ -140,27 +134,35 @@ class WorkflowDev(Workflow):
         self._write_state(Phase.REFACTORING, state.get("task"))
 
     def request_review(self) -> None:
-        """Request code review. Blocks edits until approved."""
+        """Request code review from refactoring or modifying. Runs tests first."""
         phase = self._read_phase()
-        if phase is not Phase.MODIFYING:
-            raise ValueError(f"request-review only available during modifying (current: {phase.value})")
+        if phase not in (Phase.REFACTORING, Phase.MODIFYING):
+            raise ValueError(f"request-review only available during refactoring or modifying (current: {phase.value})")
+        self._run_tests()
         state = self.read_state()
-        self._write_state(Phase.REVIEW, state.get("task"))
+        self._write_state(Phase.REVIEW, state.get("task"), review_of=phase.value)
 
     def approve(self) -> None:
-        """Approve review; return to idle."""
+        """Approve review; transition depends on what was reviewed."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"approve only available during review (current: {phase.value})")
-        self._write_state(Phase.IDLE)
+        state = self.read_state()
+        if state.get("review_of") == Phase.REFACTORING.value:
+            self._write_state(Phase.MODIFYING, state.get("task"))
+        else:
+            self._write_state(Phase.IDLE)
 
     def feedback(self) -> None:
-        """Review feedback; return to refactoring for fixes."""
+        """Review feedback; return to where we came from."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"feedback only available during review (current: {phase.value})")
         state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"))
+        if state.get("review_of") == Phase.REFACTORING.value:
+            self._write_state(Phase.REFACTORING, state.get("task"))
+        else:
+            self._write_state(Phase.MODIFYING, state.get("task"))
 
     # --- Hook gates ---
 
@@ -299,18 +301,18 @@ def main() -> None:
     elif command == CMD_REFACTOR_CODE:
         wd.refactor_code()
         print("Mode: refactor-code (code files only)")
-    elif command == CMD_READY_TO_MODIFY:
-        wd.ready_to_modify()
-        print("Tests passed; entering modifying phase")
     elif command == CMD_BACK_TO_REFACTOR:
         wd.back_to_refactor()
         print("Back to refactoring (locked)")
     elif command == CMD_REQUEST_REVIEW:
         wd.request_review()
-        print("Review requested; edits blocked")
+        state = wd.read_state()
+        review_of = state.get("review_of", "unknown")
+        print(f"Review requested (reviewing {review_of}); edits blocked. Invoke /code-review now.")
     elif command == CMD_APPROVE:
         wd.approve()
-        print("Review approved; returning to idle")
+        phase = wd.read_state()["phase"]
+        print(f"Review approved; entering {phase}")
     elif command == CMD_FEEDBACK:
         wd.feedback()
         print("Review feedback; returning to refactoring (locked)")

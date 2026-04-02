@@ -50,20 +50,25 @@ idle ──start-task──► refactoring (locked)
                          │
               expand-coverage / refactor-code (toggle)
                          │
-                    ready-to-modify (tests must pass)
+                    request-review (tests must pass)
                          │
                          ▼
-                     modifying (code + tests unlocked)
+                      review (all locked, reviewer runs)
                       │      │
-          back-to-refactor   request-review
-                      │              │
-                      ▼              ▼
-              refactoring (locked)  review (all locked)
-                                     │
-                              approve / feedback
-                                     │
-                                     ▼
-                              idle / refactoring
+                  approve    feedback
+                      │          │
+                      ▼          ▼
+                 modifying    refactoring
+                  │      │
+  back-to-refactor  request-review (tests must pass)
+          │              │
+          ▼              ▼
+     refactoring      review ──approve──► idle
+                         │
+                      feedback
+                         │
+                         ▼
+                      modifying
 ```
 
 ### States
@@ -84,11 +89,10 @@ idle ──start-task──► refactoring (locked)
 | `start-task <name>` | idle | refactoring | — |
 | `expand-coverage` | refactoring | refactoring (expand-coverage) | — |
 | `refactor-code` | refactoring | refactoring (refactor-code) | — |
-| `ready-to-modify` | refactoring | modifying | Tests must pass |
+| `request-review` | refactoring or modifying | review | Tests must pass |
+| `approve` | review | modifying (if reviewing refactoring) or idle (if reviewing modifying) | — |
+| `feedback` | review | refactoring (if reviewing refactoring) or modifying (if reviewing modifying) | — |
 | `back-to-refactor` | modifying | refactoring (locked) | — |
-| `request-review` | modifying | review | — |
-| `approve` | review | idle | — |
-| `feedback` | review | refactoring (locked) | — |
 
 ---
 
@@ -102,17 +106,20 @@ idle ──start-task──► refactoring (locked)
 - Iterative: decompose into small steps, commit after each
 - Toggle between `expand-coverage` (tests) and `refactor-code` (code)
 - Natural rhythm: write tests first, then refactor
-- When code is ready for behaviour change: `ready-to-modify`
+- When refactoring is complete: `request-review` (runs tests, then **Code Reviewer** must approve before modifying)
 
 ### Modifying
 - Make behaviour-changing edits (code + tests together)
 - May cycle back via `back-to-refactor` for further preparation
-- Multiple refactor→modify cycles allowed per task
-- When complete: `request-review`
+- Multiple refactor→modify cycles allowed per task (each refactoring phase ends with review)
+- When complete: `request-review` (runs tests, then **Code Reviewer** must approve before task closes)
 
 ### Review
 - **Code Reviewer** examines work for consolidation, code smells, fragile implementations
-- `approve` → idle; `feedback` → back to refactoring
+- Mandatory at both transitions: refactoring→modifying and modifying→idle
+- `approve` → modifying (post-refactoring) or idle (post-modifying)
+- `feedback` → back to refactoring (post-refactoring) or modifying (post-modifying)
+- `request-review` output reminds **Dev Assistant** to invoke `/code-review`
 
 ---
 
