@@ -231,6 +231,9 @@ class PaperAuthoring(Workflow):
         self._update_dashboard_state_from_stack()
         return popped
 
+    STATE_BEGIN = "<!-- state -->"
+    STATE_END = "<!-- /state -->"
+
     def _update_dashboard_state_from_stack(self) -> None:
         """Render the full state stack into the dashboard."""
         if not self.dashboard_path.exists():
@@ -238,22 +241,21 @@ class PaperAuthoring(Workflow):
         dashboard = self._read_dashboard()
         stack = self._read_stack()
         # Render stack: top element as current, rest as context with ↳
-        lines = ["**State:**"]
+        lines = []
         for i, frame in enumerate(reversed(stack)):
             phase = frame["phase"]
             task = frame.get("task")
             entry = phase + (f" — {task}" if task else "")
             if i == 0:
-                lines.append(f"- {entry}")
+                lines.append(f"**State:** {entry}")
             else:
                 lines.append(f"  ↳ {entry}")
-        state_block = "\n".join(lines)
-        if re.search(r"^\*\*State:\*\*", dashboard, re.MULTILINE):
-            # Replace existing state block (may be multi-line)
-            dashboard = re.sub(
-                r"^\*\*State:\*\*.*?(?=\n[^ \-↳]|\Z)", state_block,
-                dashboard, flags=re.MULTILINE | re.DOTALL
-            )
+        state_content = "\n".join(lines)
+        state_block = f"{self.STATE_BEGIN}\n{state_content}\n{self.STATE_END}"
+        if self.STATE_BEGIN in dashboard:
+            # Replace between delimiters
+            pattern = rf"{re.escape(self.STATE_BEGIN)}.*?{re.escape(self.STATE_END)}"
+            dashboard = re.sub(pattern, state_block, dashboard, flags=re.DOTALL)
         else:
             dashboard = dashboard.replace(
                 "# Task Dashboard\n",

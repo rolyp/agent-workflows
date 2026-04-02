@@ -104,7 +104,7 @@ class ConstructorTest(TestFixture):
     def test_writes_state_to_dashboard(self):
         tracker = self._make_tracker()
         dashboard = tracker._read_dashboard()
-        self.assertIn("- idle", dashboard)
+        self.assertIn("**State:** idle", dashboard)
 
     def test_preserves_existing_state(self):
         self._write_workflow_files()
@@ -215,7 +215,7 @@ class StateTest(TestFixture):
     def test_state_reported_in_dashboard(self):
         tracker = self._make_tracker()
         dashboard = tracker._read_dashboard()
-        self.assertIn("- idle", dashboard)
+        self.assertIn("**State:** idle", dashboard)
 
     def test_state_line_updated_not_duplicated(self):
         tracker = self._make_tracker(_make_dashboard(
@@ -229,7 +229,7 @@ class StateTest(TestFixture):
         tracker.edit_to_review()
         dashboard = tracker._read_dashboard()
         self.assertEqual(dashboard.count("**State:**"), 1)
-        self.assertIn("- author-review — Task A", dashboard)
+        self.assertIn("**State:** author-review — Task A", dashboard)
 
 
 class EditToReviewTest(TestFixture):
