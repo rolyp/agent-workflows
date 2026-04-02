@@ -145,19 +145,6 @@ class InvariantTest(TestFixture):
             tracker.assert_valid()
         self.assertTrue(any("idle" in e and "markers" in e for e in ctx.exception.errors))
 
-    def test_multiple_in_progress(self):
-        tracker = self._make_tracker()
-        # Break invariant after construction
-        (self.test_dir / "workflow" / "dashboard.md").write_text(
-            _make_dashboard(
-                structural_tasks=["Task one", "Task two"],
-                in_progress=["- 🔵 Task A", "- 🔵 Task B"],
-            )
-        )
-        with self.assertRaises(ValidationError) as ctx:
-            tracker.assert_valid()
-        self.assertTrue(any("Multiple in-progress" in e for e in ctx.exception.errors))
-
     def test_coexisting_markers(self):
         tracker = self._make_tracker(_make_dashboard(
             structural_tasks=["Task one", "Task two"],
@@ -500,7 +487,7 @@ class SubtaskTest(TestFixture):
         tracker = self._make_tracker_with_selected_task()
         tracker.add_subtask("test-1a", "Fix introduction")
         dashboard = tracker._read_dashboard()
-        self.assertIn("  - Fix introduction (subtask: test-1a)", dashboard)
+        self.assertIn("[ ] Fix introduction (subtask: test-1a)", dashboard)
 
     def test_select_subtask_pushes_state(self):
         tracker = self._make_tracker_with_selected_task()
@@ -530,11 +517,11 @@ class SubtaskTest(TestFixture):
         self.assertEqual(len(stack), 1)
         self.assertEqual(stack[-1]["task"], "test-1")
 
-    def test_complete_subtask_marks_done_in_dashboard(self):
+    def test_complete_subtask_shows_checked_in_dashboard(self):
         tracker = self._make_tracker_with_selected_task()
         tracker.add_subtask("test-1a", "Fix introduction")
         tracker.select_subtask("test-1a", [("sec/intro.tex", "intro passage")])
         tracker.complete_task()
         dashboard = tracker._read_dashboard()
-        self.assertIn("~~", dashboard)
+        self.assertIn("[x] Fix introduction", dashboard)
         self.assertNotIn("🔵 Fix introduction", dashboard)

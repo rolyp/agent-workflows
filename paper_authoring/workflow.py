@@ -205,16 +205,13 @@ class PaperAuthoring(Workflow):
             frame["regions"] = [[f, p] for f, p in regions]
         elif "regions" in stack[-1]:
             frame["regions"] = stack[-1]["regions"]
-        # Preserve or update extra fields (description, note_link, etc.)
         for key in ("description", "note_link", "plan_link", "subtasks"):
             if key in extra:
                 frame[key] = extra[key]
             elif key in stack[-1]:
                 frame[key] = stack[-1][key]
         stack[-1] = frame
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-
-        self.assert_valid()
+        self._save_stack(stack)
 
     def _push_state(self, phase: Phase, task: str | None = None, regions: list | None = None) -> None:
         """Push a new frame onto the state stack."""
@@ -223,19 +220,15 @@ class PaperAuthoring(Workflow):
         if regions is not None:
             frame["regions"] = [[f, p] for f, p in regions]
         stack.append(frame)
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        self._save_stack(stack)
 
-        self.assert_valid()
-
-    def _pop_state(self) -> dict:
-        """Pop the top frame and return it. Restores the previous frame."""
+    def _pop_state(self) -> dict[str, object]:
+        """Pop the top frame and return it. Caller must validate."""
         stack = self._read_stack()
         if len(stack) <= 1:
             raise ValueError("Cannot pop the last state frame")
         popped = stack.pop()
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-        top = stack[-1]
-
+        self._save_stack(stack, validate=False)
         return popped
 
     # --- Dashboard rendering ---
@@ -264,12 +257,16 @@ class PaperAuthoring(Workflow):
         # Render subtasks
         subtasks = root.get("subtasks", [])
         for st in subtasks:
-            # Check if this subtask is active (appears on the stack)
+            completed = st.get("completed", False)
             st_is_active = any(
                 f.get("task") == st["id"] for f in stack[1:]
             )
-            st_prefix = "🔵 " if st_is_active and len(stack) == 2 else ""
-            lines.append(f"  - {st_prefix}{st['description']} (subtask: {st['id']})")
+            if completed:
+                lines.append(f"  - [x] {st['description']} (subtask: {st['id']})")
+            elif st_is_active:
+                lines.append(f"  - 🔵 {st['description']} (subtask: {st['id']})")
+            else:
+                lines.append(f"  - [ ] {st['description']} (subtask: {st['id']})")
         # Render pushed frames (workflow-dev etc.) as children
         for frame in stack[1:]:
             phase = frame.get("phase", "")
@@ -392,34 +389,24 @@ class PaperAuthoring(Workflow):
         desc_match = re.match(r"^- (.+?) \(\[note\]\((.+?)\)\)(.*)$", task_line)
         description = desc_match.group(1) if desc_match else task_line[2:]
         note_link = desc_match.group(2) if desc_match else None
+        # Remove from To do
         dashboard = dashboard.replace(task_line + "\n", "")
-        # Add to In progress with 🔵
-        dashboard = dashboard.replace(
-            "## In progress\n\n(none)",
-            f"## In progress\n\n{task_line[:2]}🔵 {task_line[2:]}",
-        )
         self.dashboard_path.write_text(dashboard)
+        # Place edit bars
         for file_path, passage in regions:
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
+        # Update state and render In Progress from state
         self._write_state(Phase.EDIT, note_id, regions=regions,
                           description=description, note_link=note_link)
 
     def select_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
-        """Start an ad hoc edit; place review bars (skips Edit, goes to review).
-
-        regions is a list of (file_path, passage) pairs.
-        """
+        """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
         if not regions:
             raise ValueError("At least one edit region required")
-        dashboard = self._read_dashboard()
-        dashboard = dashboard.replace(
-            "## In progress\n\n(none)",
-            f"## In progress\n\n- 🔵 {self.AD_HOC}",
-        )
-        self.dashboard_path.write_text(dashboard)
         for file_path, passage in regions:
             self._place_bars(file_path, passage, REVIEW_START, REVIEW_END)
-        self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC, regions=regions)
+        self._write_state(Phase.AUTHOR_REVIEW, self.AD_HOC, regions=regions,
+                          description=self.AD_HOC)
 
     # --- Planning ---
 
@@ -443,20 +430,10 @@ class PaperAuthoring(Workflow):
             f"Task: [{task}](../todo/structural.md#note-{task})\n\n"
             f"## Problem\n\n## Proposed approach\n\n## Open questions\n"
         )
-        # Link from dashboard
-        dashboard = self._read_dashboard()
-        in_progress_match = re.search(r"^(- 🔵 .*)$", dashboard, re.MULTILINE)
-        if in_progress_match:
-            old_line = in_progress_match.group(1)
-            plan_link = f" · [plan](plans/{plan_name}.md)"
-            if "plan" not in old_line:
-                dashboard = dashboard.replace(old_line, old_line + plan_link)
-                self.dashboard_path.write_text(dashboard)
         plan_link_rel = f"plans/{plan_name}.md"
-        # Store plan link in parent frame
         stack = self._read_stack()
         stack[-1]["plan_link"] = plan_link_rel
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        self._save_stack(stack)
         self._push_state(Phase.PLANNING, task)
         return plan_path
 
@@ -469,35 +446,24 @@ class PaperAuthoring(Workflow):
         self.assert_valid()
 
     def complete_task(self) -> None:
-        """Complete the current task or subtask.
-
-        If completing a subtask (stack depth > 1): remove bars, mark subtask done
-        in dashboard, pop state back to parent.
-        If completing a top-level task: remove bars, update counts, return to idle.
-        """
-        state = self.read_state()
-        task = state.get("task")
+        """Complete the current task or subtask."""
         stack = self._read_stack()
 
-        # Remove all bars from .tex files
         for path in (self._tex_files_containing(EDIT_START)
                      + self._tex_files_containing(REVIEW_START)):
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
         self._build()
 
-        dashboard = self._read_dashboard()
-
         if len(stack) > 1:
-            # Completing a subtask — mark done with strikethrough, pop state
-            pattern = rf"^  - 🔵 (.+subtask: {re.escape(task or '')}\))$"
-            match = re.search(pattern, dashboard, re.MULTILINE)
-            if match:
-                old_line = match.group(0)
-                dashboard = dashboard.replace(old_line, f"  - ~~{match.group(1)}~~")
-                self.dashboard_path.write_text(dashboard)
-            popped = self._pop_state()
-            # Restore parent bars from stored regions
+            completed_task = self.read_state().get("task")
+            self._pop_state()
+            # Mark subtask as completed in parent's list
+            parent_stack = self._read_stack()
+            for st in parent_stack[-1].get("subtasks", []):
+                if st.get("id") == completed_task:
+                    st["completed"] = True
+            self._save_stack(parent_stack, validate=False)
             parent = self.read_state()
             parent_regions = parent.get("regions", [])
             for file_path, passage in parent_regions:
@@ -506,127 +472,67 @@ class PaperAuthoring(Workflow):
                     self._place_bars(file_path, passage, EDIT_START, EDIT_END)
             self.assert_valid()
         else:
-            # Completing a top-level task
-            in_progress_match = re.search(r"^- 🔵 .*$", dashboard, re.MULTILINE)
-            if in_progress_match:
-                line = in_progress_match.group(0)
-                if "minor-issues.md" in line:
-                    kind = "minor"
-                else:
-                    kind = "structural"
-                # Increment done count
-                count_pattern = rf"(Completed {kind}.*?\()(\d+)( of \d+\))"
-                count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
-                if count_match:
-                    old_done = int(count_match.group(2))
-                    dashboard = (dashboard[:count_match.start(2)]
-                               + str(old_done + 1)
-                               + dashboard[count_match.end(2):])
-            # Remove entire in-progress block (parent + subtasks)
-            dashboard = re.sub(r"^- 🔵 .*$\n?(  - .*\n)*", "", dashboard, flags=re.MULTILINE)
-            # If In progress is now empty, restore (none)
-            dashboard = re.sub(
-                r"(## In progress\n\n)\s*\n",
-                r"\1(none)\n\n",
-                dashboard,
-            )
-            self.dashboard_path.write_text(dashboard)
+            self._increment_done_count()
             self._write_state(Phase.IDLE)
+
+    def _increment_done_count(self) -> None:
+        """Increment the completed count for the current task's kind."""
+        state = self.read_state()
+        note_link = state.get("note_link", "")
+        kind = "minor" if "minor-issues.md" in str(note_link) else "structural"
+        dashboard = self._read_dashboard()
+        count_pattern = rf"(Completed {kind}.*?\()(\d+)( of \d+\))"
+        count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
+        if count_match:
+            old_done = int(count_match.group(2))
+            dashboard = (dashboard[:count_match.start(2)]
+                       + str(old_done + 1)
+                       + dashboard[count_match.end(2):])
+            self.dashboard_path.write_text(dashboard)
 
     # --- Subtasks ---
 
     def add_subtask(self, subtask_id: str, description: str) -> None:
         """Add a subtask under the current in-progress task."""
-        # Update state.json
         stack = self._read_stack()
         frame = stack[-1]
-        subtasks = frame.get("subtasks", [])
+        subtasks = list(frame.get("subtasks", []))
         subtasks.append({"id": subtask_id, "description": description})
         frame["subtasks"] = subtasks
+        self._save_stack(stack)
+
+    def _save_stack(self, stack: list[dict[str, object]], validate: bool = True) -> None:
+        """Write the stack and render. Optionally validate."""
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-        # Update dashboard
-        dashboard = self._read_dashboard()
-        in_progress_match = re.search(r"^(- 🔵 .*)$", dashboard, re.MULTILINE)
-        if not in_progress_match:
-            raise ValueError("No in-progress task to add subtask to")
-        parent_line = in_progress_match.group(1)
-        subtask_line = f"  - {description} (subtask: {subtask_id})"
-        dashboard = dashboard.replace(
-            parent_line,
-            parent_line + "\n" + subtask_line,
-        )
-        self.dashboard_path.write_text(dashboard)
+        self._update_in_progress()
+        if validate and self._read_phase() is not None:
+            self.assert_valid()
 
     def select_subtask(self, subtask_id: str, regions: list[tuple[str, str]]) -> None:
         """Select a subtask; remove parent bars, place subtask bars, push state."""
         if not regions:
             raise ValueError("At least one edit region required")
-        # Remove all current bars
         for path in (self._tex_files_containing(EDIT_START)
                      + self._tex_files_containing(REVIEW_START)):
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
-        # Place subtask bars
         for file_path, passage in regions:
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
-        # Mark subtask active in dashboard
-        dashboard = self._read_dashboard()
-        pattern = rf"^(  - .+subtask: {re.escape(subtask_id)}\))$"
-        match = re.search(pattern, dashboard, re.MULTILINE)
-        if match:
-            old_line = match.group(1)
-            dashboard = dashboard.replace(old_line, f"  - 🔵 {old_line[4:]}")
-            self.dashboard_path.write_text(dashboard)
         self._push_state(Phase.EDIT, subtask_id, regions=regions)
 
 
     # --- Workflow dev ---
 
     def begin_workflow_dev(self, reason: str) -> None:
-        """Add workflow-dev as active child in dashboard; push state."""
-        dashboard = self._read_dashboard()
-        # Find the current 🔵 line (could be top-level or subtask)
-        active_match = re.search(r"^( *)- 🔵 (.*)$", dashboard, re.MULTILINE)
-        if not active_match:
-            raise ValueError("No active task to nest workflow-dev under")
-        indent = active_match.group(1)
-        active_content = active_match.group(2)
-        old_line = active_match.group(0)
-        # Remove 🔵 from current active, add workflow-dev child with 🔵
-        child_indent = indent + "  "
-        new_line = f"{indent}- {active_content}\n{child_indent}- 🔵 ⚙️ {reason}"
-        dashboard = dashboard.replace(old_line, new_line)
-        self.dashboard_path.write_text(dashboard)
+        """Push workflow-dev frame and re-render In Progress."""
         self._push_state_raw(WORKFLOW_DEV_PHASE, reason, description=reason)
 
     def end_workflow_dev(self) -> None:
-        """Remove workflow-dev child from dashboard; restore parent 🔵; pop state."""
+        """Pop workflow-dev frame and re-render In Progress."""
         phase = self._read_phase_raw()
         if phase != WORKFLOW_DEV_PHASE:
             raise ValueError(f"Not in workflow_dev phase (current: {phase})")
-        dashboard = self._read_dashboard()
-        # Find and remove the 🔵 ⚙️ line
-        dev_match = re.search(r"^( *)- 🔵 ⚙️ .*$", dashboard, re.MULTILINE)
-        if dev_match:
-            dashboard = dashboard.replace(dev_match.group(0) + "\n", "")
-        # Restore 🔵 to the parent (the line that was previously active)
-        # The parent is now the nearest non-indented-more-than-dev line above
-        self.dashboard_path.write_text(dashboard)
         self._pop_state()
-        # Re-read state to get the parent task and mark it active
-        state = self.read_state()
-        task = state.get("task")
-        if task:
-            dashboard = self._read_dashboard()
-            # Find the parent line (contains the task id or description)
-            parent_pattern = rf"^( *)- (.*(?:{re.escape(task)}).*)$"
-            parent_match = re.search(parent_pattern, dashboard, re.MULTILINE)
-            if parent_match:
-                old = parent_match.group(0)
-                indent = parent_match.group(1)
-                content = parent_match.group(2)
-                dashboard = dashboard.replace(old, f"{indent}- 🔵 {content}")
-                self.dashboard_path.write_text(dashboard)
         self.assert_valid()
 
     # --- Bar operations (require active task) ---
@@ -694,7 +600,7 @@ class PaperAuthoring(Workflow):
         frame: dict[str, object] = {"phase": phase_str, "task": task}
         frame.update(extra)
         stack.append(frame)
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        self._save_stack(stack)
 
 
     def _read_phase_raw(self) -> str:
@@ -865,19 +771,15 @@ class PaperAuthoring(Workflow):
 
 
     def _count_in_progress_for_kind(self, dashboard: str, kind: str) -> int:
-        """Count in-progress items that belong to the given kind (minor/structural)."""
-        in_progress_section = re.search(
-            r"^## In progress$\n(.*?)(?=^## )", dashboard, re.MULTILINE | re.DOTALL
-        )
-        if not in_progress_section:
+        """Count in-progress items of the given kind from the state stack."""
+        stack = self._read_stack()
+        if not stack or stack[0].get("phase") == Phase.IDLE.value:
             return 0
-        section = in_progress_section.group(1)
+        note_link = str(stack[0].get("note_link", ""))
         if kind == "minor":
-            # Minor tasks link to minor-issues.md
-            return len(re.findall(r"minor-issues\.md", section))
+            return 1 if "minor-issues.md" in note_link else 0
         else:
-            # Structural tasks link to structural.md
-            return len(re.findall(r"structural\.md", section))
+            return 1 if "structural.md" in note_link else 0
 
     def _minor_issues_path(self) -> Path:
         return self.root / "workflow" / "todo" / "minor-issues.md"
@@ -886,8 +788,11 @@ class PaperAuthoring(Workflow):
         return self.dashboard_path.read_text()
 
     def _count_in_progress(self, dashboard: str) -> int:
-        """Count top-level in-progress tasks (not subtasks)."""
-        return len(re.findall(r"^- 🔵", dashboard, re.MULTILINE))
+        """Count in-progress tasks from the state stack."""
+        stack = self._read_stack()
+        if not stack or stack[0].get("phase") == Phase.IDLE.value:
+            return 0
+        return 1
 
     def _tex_files_containing(self, pattern: str) -> list[str]:
         return [
