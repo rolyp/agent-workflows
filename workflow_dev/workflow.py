@@ -100,9 +100,9 @@ class WorkflowDev(Workflow):
         )
         self.dashboard_path.write_text(dashboard)
 
-    def _save_stack(self, stack: list[dict]) -> None:
+    def _save_stack(self, stack: list[dict], validate: bool = True) -> None:
         """Write stack and update dashboard."""
-        super()._save_stack(stack)
+        super()._save_stack(stack, validate=validate)
         self._update_dashboard()
 
     # --- Commands ---

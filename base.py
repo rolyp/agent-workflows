@@ -52,17 +52,21 @@ class Workflow(ABC):
         stack.append(frame)
         self._save_stack(stack)
 
-    def _pop_state(self) -> dict[str, object]:
+    def _pop_state(self, validate: bool = True) -> dict[str, object]:
         """Pop the top frame and return it."""
         stack = self._read_stack()
         if len(stack) <= 1:
             raise ValueError("Cannot pop the last state frame")
         popped = stack.pop()
-        self._save_stack(stack)
+        self._save_stack(stack, validate=validate)
         return popped
 
-    def _save_stack(self, stack: list[dict]) -> None:
-        """Write the stack to disk. Subclasses may override to add side effects."""
+    def _save_stack(self, stack: list[dict], validate: bool = True) -> None:
+        """Write the stack to disk. Subclasses may override to add side effects.
+
+        validate is a hint for subclasses (e.g. PaperAuthoring skips
+        validation when the caller will validate after further changes).
+        """
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
 
     def _init_state(self, idle_phase: Enum) -> None:

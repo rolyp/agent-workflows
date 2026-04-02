@@ -166,22 +166,19 @@ class PaperAuthoring(Workflow):
     def _phase_enum(self) -> type[Phase]:
         return Phase
 
+    # Fields carried forward from the previous frame unless overridden
+    _CARRY_FORWARD = ("regions", "description", "note_link", "plan_link", "subtasks")
+
     def _write_state(self, phase: Phase, task: str | None = None,
                      regions: list | None = None, **extra: object) -> None:
         """Replace top frame, carrying forward paper-authoring-specific fields."""
-        stack = self._read_stack()
-        frame: dict[str, object] = {"phase": phase.value, "task": task}
+        prev = self.read_state()
         if regions is not None:
-            frame["regions"] = [[f, p] for f, p in regions]
-        elif "regions" in stack[-1]:
-            frame["regions"] = stack[-1]["regions"]
-        for key in ("description", "note_link", "plan_link", "subtasks"):
-            if key in extra:
-                frame[key] = extra[key]
-            elif key in stack[-1]:
-                frame[key] = stack[-1][key]
-        stack[-1] = frame
-        self._save_stack(stack)
+            extra["regions"] = [[f, p] for f, p in regions]
+        for key in self._CARRY_FORWARD:
+            if key not in extra and key in prev:
+                extra[key] = prev[key]
+        super()._write_state(phase, task, **extra)
 
     def _push_state(self, phase: Phase, task: str | None = None,
                     regions: list | None = None) -> None:
@@ -191,18 +188,13 @@ class PaperAuthoring(Workflow):
             extra["regions"] = [[f, p] for f, p in regions]
         super()._push_state(phase, task, **extra)
 
-    def _pop_state(self) -> dict[str, object]:
-        """Pop top frame without validation (caller validates)."""
-        stack = self._read_stack()
-        if len(stack) <= 1:
-            raise ValueError("Cannot pop the last state frame")
-        popped = stack.pop()
-        self._save_stack(stack, validate=False)
-        return popped
+    def _pop_state(self, validate: bool = True) -> dict[str, object]:
+        """Pop top frame; callers pass validate=False when they'll validate later."""
+        return super()._pop_state(validate=validate)
 
-    def _save_stack(self, stack: list[dict[str, object]], validate: bool = True) -> None:
+    def _save_stack(self, stack: list[dict], validate: bool = True) -> None:
         """Write stack, update dashboard, optionally validate."""
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        super()._save_stack(stack, validate=validate)
         self._update_in_progress()
         if validate:
             self.assert_valid()
@@ -409,7 +401,7 @@ class PaperAuthoring(Workflow):
         phase = self._read_phase()
         if phase is not Phase.PLANNING:
             raise ValueError(f"Can only approve plans during planning phase (current: {phase.value})")
-        self._pop_state()
+        self._pop_state(validate=False)
         self.assert_valid()
 
     def complete_task(self) -> None:
@@ -424,7 +416,7 @@ class PaperAuthoring(Workflow):
 
         if len(stack) > 1:
             completed_task = self.read_state().get("task")
-            self._pop_state()
+            self._pop_state(validate=False)
             # Mark subtask as completed in parent's list
             parent_stack = self._read_stack()
             for st in parent_stack[-1].get("subtasks", []):
