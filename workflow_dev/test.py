@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from workflow import WorkflowDev, SUBMODULE_DIR
+from workflow_dev.workflow import WorkflowDev, SUBMODULE_DIR
 
 
 class TestFixture(unittest.TestCase):
@@ -16,7 +16,7 @@ class TestFixture(unittest.TestCase):
         self.test_dir = Path(tempfile.mkdtemp())
         os.chdir(self.test_dir)
         # Create submodule directory structure
-        (self.test_dir / SUBMODULE_DIR / "paper-authoring").mkdir(parents=True)
+        (self.test_dir / SUBMODULE_DIR / "paper_authoring").mkdir(parents=True)
         self.wd = WorkflowDev(self.test_dir)
 
     def tearDown(self):
@@ -26,7 +26,7 @@ class TestFixture(unittest.TestCase):
 
 class CheckEditTest(TestFixture):
     def test_submodule_file_allowed(self):
-        allowed, msg = self.wd.check_edit(f"{SUBMODULE_DIR}/paper-authoring/status_tracker.py")
+        allowed, msg = self.wd.check_edit(f"{SUBMODULE_DIR}/paper_authoring/status_tracker.py")
         self.assertTrue(allowed)
         self.assertEqual(msg, "")
 
@@ -45,20 +45,20 @@ class CheckEditTest(TestFixture):
         self.assertTrue(allowed)
 
     def test_absolute_submodule_path_allowed(self):
-        abs_path = str(self.test_dir / SUBMODULE_DIR / "paper-authoring" / "test.py")
+        abs_path = str(self.test_dir / SUBMODULE_DIR / "paper_authoring" / "test.py")
         allowed, msg = self.wd.check_edit(abs_path)
         self.assertTrue(allowed)
 
 
 class CheckWriteTest(TestFixture):
     def test_new_submodule_file_allowed(self):
-        allowed, msg = self.wd.check_write(f"{SUBMODULE_DIR}/paper-authoring/new_file.py")
+        allowed, msg = self.wd.check_write(f"{SUBMODULE_DIR}/paper_authoring/new_file.py")
         self.assertTrue(allowed)
 
     def test_existing_submodule_file_blocked(self):
-        existing = self.test_dir / SUBMODULE_DIR / "paper-authoring" / "existing.py"
+        existing = self.test_dir / SUBMODULE_DIR / "paper_authoring" / "existing.py"
         existing.write_text("content\n")
-        allowed, msg = self.wd.check_write(f"{SUBMODULE_DIR}/paper-authoring/existing.py")
+        allowed, msg = self.wd.check_write(f"{SUBMODULE_DIR}/paper_authoring/existing.py")
         self.assertFalse(allowed)
         self.assertIn("Edit tool", msg)
 

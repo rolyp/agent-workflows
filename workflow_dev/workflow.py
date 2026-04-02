@@ -7,16 +7,18 @@ Enforces that edits are scoped to the agent-workflows submodule directory.
 import sys
 from pathlib import Path
 
+from base import Workflow
+
 # Submodule path relative to project root
 SUBMODULE_DIR = "workflow/agent-workflows"
 
 
-class WorkflowDev:
+class WorkflowDev(Workflow):
     def __init__(self, project_root: Path):
         self.root = project_root
         self.submodule_path = project_root / SUBMODULE_DIR
 
-    def check_edit(self, file_path: str) -> tuple[bool, str]:
+    def check_edit(self, file_path: str, old_string: str | None = None, new_string: str | None = None) -> tuple[bool, str]:
         """Check whether an edit is allowed during workflow development.
 
         Only files within the agent-workflows submodule are editable.

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for Edit. Reads tool input from stdin, checks with PaperAuthoring."""
+"""PreToolUse hook for Edit. Dispatches to the active workflow's check_edit."""
 
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from workflow import PaperAuthoring
+# Add agent-workflows to path for imports
+sys.path.insert(0, str(Path.cwd() / "workflow" / "agent-workflows"))
+from dispatch import get_workflow
 
 
 def main() -> None:
@@ -18,8 +19,12 @@ def main() -> None:
     if not file_path:
         return
 
-    tracker = PaperAuthoring(Path.cwd())
-    allowed, message = tracker.check_edit(file_path, old_string, new_string)
+    try:
+        workflow = get_workflow(Path.cwd())
+    except Exception:
+        return  # fail open if workflow can't be constructed
+
+    allowed, message = workflow.check_edit(file_path, old_string, new_string)
 
     if not allowed:
         print(message, file=sys.stderr)

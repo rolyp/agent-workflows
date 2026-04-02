@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from workflow import (
+from paper_authoring.workflow import (
     CHANGE_MARKUP, EDIT_END, EDIT_START, Phase, REVIEW_END, REVIEW_START,
     PaperAuthoring, ValidationError,
 )

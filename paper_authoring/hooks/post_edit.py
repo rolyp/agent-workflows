@@ -13,7 +13,7 @@ def main() -> None:
     if not file_path or not file_path.endswith(".tex"):
         return
 
-    build_script = Path.cwd() / "workflow" / "agent-workflows" / "paper-authoring" / "build.sh"
+    build_script = Path.cwd() / "workflow" / "agent-workflows" / "paper_authoring" / "build.sh"
     if not build_script.exists():
         return
 

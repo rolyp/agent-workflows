@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Status Tracker: owns all task state and marker coherence.
+"""PaperAuthoring: paper_authoring workflow automaton.
 
 Each method reads current state from disk, performs its operation, and writes
 back. No in-memory state is cached between calls.
@@ -14,6 +14,17 @@ import re
 import sys
 from enum import Enum
 from pathlib import Path
+
+# Ensure parent directory is on path when run as script
+if __name__ == "__main__" or "base" not in sys.modules:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from base import Workflow
+# Ensure parent directory is on path when run as script
+if __name__ == "__main__" or "base" not in sys.modules:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from base import WORKFLOW_DEV_PHASE
 
 
 # LaTeX marker commands (must match change-tracking.tex)
@@ -45,6 +56,8 @@ CMD_CREATE_PLAN = "create-plan"
 CMD_APPROVE_PLAN = "approve-plan"
 CMD_ADD_SUBTASK = "add-subtask"
 CMD_SELECT_SUBTASK = "select-subtask"
+CMD_BEGIN_WORKFLOW_DEV = "begin-workflow_dev"
+CMD_END_WORKFLOW_DEV = "end-workflow_dev"
 CMD_CHECK_EDIT = "check-edit"
 
 
@@ -64,7 +77,8 @@ class ValidationError(Exception):
         super().__init__(f"{len(errors)} invariant(s) violated")
 
 
-class PaperAuthoring:
+
+class PaperAuthoring(Workflow):
     def __init__(self, project_root: Path):
         self.root = project_root
         self.dashboard_path = project_root / "workflow" / "dashboard.md"
@@ -86,7 +100,9 @@ class PaperAuthoring:
             self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
             self._update_dashboard_state(Phase.IDLE, None)
 
-        self.assert_valid()
+        # Skip validation if top of stack is a foreign phase
+        if self._read_phase() is not None:
+            self.assert_valid()
 
     # --- Invariants ---
 
@@ -150,6 +166,8 @@ class PaperAuthoring:
 
     def _state_consistent_with_markers(self) -> list[str]:
         phase = self._read_phase()
+        if phase is None:
+            return []  # foreign phase (e.g. workflow_dev) — skip marker checks
         has_edit = bool(self._tex_files_containing(EDIT_START))
         has_review = bool(self._tex_files_containing(REVIEW_START))
         errors = []
@@ -165,26 +183,23 @@ class PaperAuthoring:
 
     def read_state(self) -> dict:
         """Read the top frame of the state stack."""
-        raw = json.loads(self.state_path.read_text())
-        # Migration: flat dict → stack
-        if isinstance(raw, dict):
-            return raw
-        return raw[-1]
+        return self._read_stack()[-1]
 
     def _read_stack(self) -> list[dict]:
-        raw = json.loads(self.state_path.read_text())
-        # Migration: flat dict → stack
-        if isinstance(raw, dict):
-            return [raw]
-        return raw
+        return json.loads(self.state_path.read_text())
 
-    def _read_phase(self) -> Phase:
-        return Phase(self.read_state()["phase"])
+    def _read_phase(self) -> Phase | None:
+        """Read the phase from the top of the stack. Returns None for foreign phases."""
+        phase_str = self.read_state()["phase"]
+        try:
+            return Phase(phase_str)
+        except ValueError:
+            return None
 
     def _write_state(self, phase: Phase, task: str | None = None, regions: list | None = None) -> None:
         """Replace the top frame of the state stack."""
         stack = self._read_stack()
-        frame = {"phase": phase.value, "task": task}
+        frame: dict[str, object] = {"phase": phase.value, "task": task}
         if regions is not None:
             frame["regions"] = [[f, p] for f, p in regions]
         elif "regions" in stack[-1]:
@@ -197,7 +212,7 @@ class PaperAuthoring:
     def _push_state(self, phase: Phase, task: str | None = None, regions: list | None = None) -> None:
         """Push a new frame onto the state stack."""
         stack = self._read_stack()
-        frame = {"phase": phase.value, "task": task}
+        frame: dict[str, object] = {"phase": phase.value, "task": task}
         if regions is not None:
             frame["regions"] = [[f, p] for f, p in regions]
         stack.append(frame)
@@ -361,7 +376,7 @@ class PaperAuthoring:
         """
         phase = self._read_phase()
         if phase is not Phase.EDIT:
-            raise ValueError(f"Can only create plans during edit phase (current: {phase.value})")
+            raise ValueError(f"Can only create plans during edit phase (current: {phase.value if phase else 'foreign'})")
         plans_dir = self.root / "workflow" / "plans"
         plans_dir.mkdir(parents=True, exist_ok=True)
         plan_path = plans_dir / f"{plan_name}.md"
@@ -390,7 +405,7 @@ class PaperAuthoring:
         """Approve the plan and pop back to the previous phase."""
         phase = self._read_phase()
         if phase is not Phase.PLANNING:
-            raise ValueError(f"Can only approve plans during planning phase (current: {phase.value})")
+            raise ValueError(f"Can only approve plans during planning phase (current: {phase.value if phase else 'foreign'})")
         self._pop_state()
         self.assert_valid()
 
@@ -416,7 +431,7 @@ class PaperAuthoring:
 
         if len(stack) > 1:
             # Completing a subtask — mark done with strikethrough, pop state
-            pattern = rf"^  - 🔵 (.+subtask: {re.escape(task)}\))$"
+            pattern = rf"^  - 🔵 (.+subtask: {re.escape(task or '')}\))$"
             match = re.search(pattern, dashboard, re.MULTILINE)
             if match:
                 old_line = match.group(0)
@@ -497,6 +512,21 @@ class PaperAuthoring:
             self.dashboard_path.write_text(dashboard)
         self._push_state(Phase.EDIT, subtask_id, regions=regions)
 
+
+    # --- Workflow dev ---
+
+    def begin_workflow_dev(self, reason: str) -> None:
+        """Push a workflow_dev frame onto the state stack."""
+        self._push_state_raw(WORKFLOW_DEV_PHASE, reason)
+
+    def end_workflow_dev(self) -> None:
+        """Pop the workflow_dev frame."""
+        phase = self._read_phase_raw()
+        if phase != WORKFLOW_DEV_PHASE:
+            raise ValueError(f"Not in workflow_dev phase (current: {phase})")
+        self._pop_state()
+        self.assert_valid()
+
     # --- Bar operations (require active task) ---
 
     def open_edit(self, file_path: str, passage: str) -> None:
@@ -541,7 +571,7 @@ class PaperAuthoring:
 
     def _build(self) -> None:
         """Run the build script if it exists."""
-        build_script = self.root / "workflow" / "agent-workflows" / "paper-authoring" / "build.sh"
+        build_script = self.root / "workflow" / "agent-workflows" / "paper_authoring" / "build.sh"
         if build_script.exists():
             result = subprocess.run(
                 ["bash", str(build_script)],
@@ -554,6 +584,18 @@ class PaperAuthoring:
         phase = self._read_phase()
         if phase is Phase.IDLE:
             raise ValueError(f"No active task. Use {CMD_SELECT_TASK} or {CMD_SELECT_AD_HOC} first.")
+
+
+    def _push_state_raw(self, phase_str: str, task: str | None = None) -> None:
+        """Push a raw phase string (not necessarily a Phase enum member)."""
+        stack = self._read_stack()
+        stack.append({"phase": phase_str, "task": task})
+        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        # Don't update dashboard state or validate for non-PaperAuthoring phases
+
+    def _read_phase_raw(self) -> str:
+        """Read the raw phase string from the top of the stack."""
+        return self.read_state()["phase"]
 
     def _place_bars(self, file_path: str, passage: str,
                     start: str, end: str) -> None:
@@ -845,6 +887,15 @@ def main() -> None:
         regions = json.loads(sys.argv[3])
         tracker.select_subtask(sys.argv[2], [(r[0], r[1]) for r in regions])
         print(f"Selected subtask: {sys.argv[2]} ({len(regions)} region(s))")
+    elif command == CMD_BEGIN_WORKFLOW_DEV:
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_BEGIN_WORKFLOW_DEV} <reason>", file=sys.stderr)
+            sys.exit(1)
+        tracker.begin_workflow_dev(sys.argv[2])
+        print(f"Entered workflow_dev: {sys.argv[2]}")
+    elif command == CMD_END_WORKFLOW_DEV:
+        tracker.end_workflow_dev()
+        print("Exited workflow_dev")
     elif command == CMD_COMPLETE_TASK:
         tracker.complete_task()
         print("Task completed")

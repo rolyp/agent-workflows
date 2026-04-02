@@ -4,7 +4,7 @@ Shared workflow definitions for Claude Code agent teams, designed to be consumed
 
 ## Workflows
 
-- **[paper-authoring](paper-authoring/)** — 4-phase editing workflow for academic papers with human-in-the-loop review. Roles: Author (human), Author Assistant (team lead), Copy Editor, Structure Reviewer, Librarian, Status Tracker.
+- **[paper_authoring](paper_authoring/)** — 4-phase editing workflow for academic papers with human-in-the-loop review. Roles: Author (human), Author Assistant (team lead), Copy Editor, Structure Reviewer, Librarian, Status Tracker.
 
 ## Usage
 
@@ -17,14 +17,14 @@ git submodule add https://github.com/rolyp/agent-workflows.git workflow/agent-wo
 Copy starter templates into your project's `workflow/` directory:
 
 ```bash
-cp workflow/agent-workflows/paper-authoring/templates/dashboard.md workflow/
-cp -r workflow/agent-workflows/paper-authoring/templates/todo workflow/
+cp workflow/agent-workflows/paper_authoring/templates/dashboard.md workflow/
+cp -r workflow/agent-workflows/paper_authoring/templates/todo workflow/
 ```
 
 Point your `CLAUDE.md` at the workflow:
 
 ```
-Follow `workflow/agent-workflows/paper-authoring/workflow.md` for all paper editing.
+Follow `workflow/agent-workflows/paper_authoring/workflow.md` for all paper editing.
 ```
 
 Configure Claude Code hooks in `.claude/settings.json`:
@@ -38,7 +38,7 @@ Configure Claude Code hooks in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 workflow/agent-workflows/paper-authoring/workflow.py startup"
+            "command": "python3 workflow/agent-workflows/paper_authoring/workflow.py startup"
           }
         ]
       }
@@ -49,7 +49,7 @@ Configure Claude Code hooks in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 workflow/agent-workflows/paper-authoring/hooks/pre_edit.py"
+            "command": "python3 workflow/agent-workflows/paper_authoring/hooks/pre_edit.py"
           }
         ]
       },
@@ -58,7 +58,7 @@ Configure Claude Code hooks in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 workflow/agent-workflows/paper-authoring/hooks/pre_write.py"
+            "command": "python3 workflow/agent-workflows/paper_authoring/hooks/pre_write.py"
           }
         ]
       }
@@ -69,7 +69,7 @@ Configure Claude Code hooks in `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 workflow/agent-workflows/paper-authoring/hooks/post_edit.py"
+            "command": "python3 workflow/agent-workflows/paper_authoring/hooks/post_edit.py"
           }
         ]
       }
