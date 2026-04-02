@@ -19,10 +19,7 @@ from pathlib import Path
 if __name__ == "__main__" or "base" not in sys.modules:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from base import Workflow
-# Ensure parent directory is on path when run as script
-if __name__ == "__main__" or "base" not in sys.modules:
-    sys.path.insert(0, str(Path(__file__).parent.parent))
+from base import Workflow, ValidationError
 
 
 
@@ -68,13 +65,6 @@ class Phase(Enum):
     CLOSEOUT = "closeout"                # Phase 4: structural close-out
 
 
-class ValidationError(Exception):
-    def __init__(self, errors: list[str]):
-        self.errors = errors
-        super().__init__(f"{len(errors)} invariant(s) violated")
-
-
-
 class PaperAuthoring(Workflow):
     def __init__(self, project_root: Path):
         self.root = project_root
@@ -91,10 +81,7 @@ class PaperAuthoring(Workflow):
         if missing:
             raise FileNotFoundError(f"Missing workflow files: {', '.join(missing)}")
 
-        # Initialise state file if absent
-        if not self.state_path.exists():
-            stack = [{"phase": Phase.IDLE.value, "task": None}]
-            self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        self._init_state(Phase.IDLE)
     
 
         # Ensure dashboard reflects current state
@@ -174,21 +161,14 @@ class PaperAuthoring(Workflow):
             errors.append("State is 'idle' but markers found in .tex files")
         return errors
 
-    # --- State (pushdown automaton: stack of {phase, task} frames) ---
+    # --- State overrides (paper-authoring enriches frames) ---
 
-    def read_state(self) -> dict:
-        """Read the top frame of the state stack."""
-        return self._read_stack()[-1]
-
-    def _read_stack(self) -> list[dict]:
-        return json.loads(self.state_path.read_text())
-
-    def _read_phase(self) -> Phase:
-        return Phase(self.read_state()["phase"])
+    def _phase_enum(self) -> type[Phase]:
+        return Phase
 
     def _write_state(self, phase: Phase, task: str | None = None,
                      regions: list | None = None, **extra: object) -> None:
-        """Replace the top frame of the state stack."""
+        """Replace top frame, carrying forward paper-authoring-specific fields."""
         stack = self._read_stack()
         frame: dict[str, object] = {"phase": phase.value, "task": task}
         if regions is not None:
@@ -203,23 +183,29 @@ class PaperAuthoring(Workflow):
         stack[-1] = frame
         self._save_stack(stack)
 
-    def _push_state(self, phase: Phase, task: str | None = None, regions: list | None = None) -> None:
-        """Push a new frame onto the state stack."""
-        stack = self._read_stack()
-        frame: dict[str, object] = {"phase": phase.value, "task": task}
+    def _push_state(self, phase: Phase, task: str | None = None,
+                    regions: list | None = None) -> None:
+        """Push a new frame with optional regions."""
+        extra = {}
         if regions is not None:
-            frame["regions"] = [[f, p] for f, p in regions]
-        stack.append(frame)
-        self._save_stack(stack)
+            extra["regions"] = [[f, p] for f, p in regions]
+        super()._push_state(phase, task, **extra)
 
     def _pop_state(self) -> dict[str, object]:
-        """Pop the top frame and return it. Caller must validate."""
+        """Pop top frame without validation (caller validates)."""
         stack = self._read_stack()
         if len(stack) <= 1:
             raise ValueError("Cannot pop the last state frame")
         popped = stack.pop()
         self._save_stack(stack, validate=False)
         return popped
+
+    def _save_stack(self, stack: list[dict[str, object]], validate: bool = True) -> None:
+        """Write stack, update dashboard, optionally validate."""
+        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        self._update_in_progress()
+        if validate:
+            self.assert_valid()
 
     # --- Dashboard rendering ---
 
@@ -481,13 +467,6 @@ class PaperAuthoring(Workflow):
         frame["subtasks"] = subtasks
         self._save_stack(stack)
 
-    def _save_stack(self, stack: list[dict[str, object]], validate: bool = True) -> None:
-        """Write the stack and render. Optionally validate."""
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-        self._update_in_progress()
-        if validate:
-            self.assert_valid()
-
     def select_subtask(self, subtask_id: str, regions: list[tuple[str, str]]) -> None:
         """Select a subtask; remove parent bars, place subtask bars, push state."""
         if not regions:
@@ -590,14 +569,9 @@ class PaperAuthoring(Workflow):
         state = self.read_state()
         task = state.get("task") or "unknown"
 
-        # Files outside project root: not our concern
-        if Path(file_path).is_absolute():
-            try:
-                rel_path = str(Path(file_path).relative_to(self.root))
-            except ValueError:
-                return True, ""
-        else:
-            rel_path = file_path
+        rel_path = self._resolve(file_path)
+        if rel_path is None:
+            return True, ""  # outside project root
 
         # Protected files: never editable directly
         for protected in PROTECTED_FILES:
@@ -680,14 +654,9 @@ class PaperAuthoring(Workflow):
         Plan files can only be created by PaperAuthoring.
         Only applies to files within the project root.
         """
-        # Files outside project root: not our concern
-        if Path(file_path).is_absolute():
-            try:
-                rel_path = str(Path(file_path).relative_to(self.root))
-            except ValueError:
-                return True, ""
-        else:
-            rel_path = file_path
+        rel_path = self._resolve(file_path)
+        if rel_path is None:
+            return True, ""  # outside project root
 
         # Block writing to protected files
         for protected in PROTECTED_FILES:

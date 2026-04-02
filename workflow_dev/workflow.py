@@ -7,7 +7,6 @@ Enforces refactor-first discipline via a state machine:
 State is externalised to state.json. Hooks consult phase to gate edits/writes.
 """
 
-import json
 import subprocess
 import sys
 from enum import Enum
@@ -55,35 +54,10 @@ class WorkflowDev(Workflow):
     def __init__(self, project_root: Path):
         self.root = project_root
         self.state_path = project_root / "state.json"
+        self._init_state(Phase.IDLE)
 
-        # Initialise state file if absent
-        if not self.state_path.exists():
-            stack = [{"phase": Phase.IDLE.value, "task": None}]
-            self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
-
-    # --- State (pushdown automaton: stack of frames) ---
-
-    def read_state(self) -> dict:
-        return self._read_stack()[-1]
-
-    def _read_stack(self) -> list[dict]:
-        return json.loads(self.state_path.read_text())
-
-    def _read_phase(self) -> Phase:
-        return Phase(self.read_state()["phase"])
-
-    def _write_state(self, phase: Phase, task: str | None = None,
-                     mode: str | None = None) -> None:
-        """Replace the top frame of the state stack."""
-        stack = self._read_stack()
-        frame: dict[str, object] = {"phase": phase.value, "task": task}
-        if mode is not None:
-            frame["mode"] = mode
-        stack[-1] = frame
-        self._save_stack(stack)
-
-    def _save_stack(self, stack: list[dict]) -> None:
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+    def _phase_enum(self) -> type[Phase]:
+        return Phase
 
     # --- Commands ---
 
@@ -235,18 +209,6 @@ class WorkflowDev(Workflow):
         return True, ""
 
     # --- Helpers ---
-
-    def _resolve(self, file_path: str) -> str | None:
-        """Resolve file_path to a path relative to project root.
-
-        Returns None if the file is outside the project root.
-        """
-        if Path(file_path).is_absolute():
-            try:
-                return str(Path(file_path).relative_to(self.root))
-            except ValueError:
-                return None
-        return file_path
 
     def _run_tests(self) -> None:
         """Run pytest; raise if tests fail."""
