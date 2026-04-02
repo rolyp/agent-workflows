@@ -196,7 +196,8 @@ class PaperAuthoring(Workflow):
         except ValueError:
             return None
 
-    def _write_state(self, phase: Phase, task: str | None = None, regions: list | None = None) -> None:
+    def _write_state(self, phase: Phase, task: str | None = None,
+                     regions: list | None = None, **extra: object) -> None:
         """Replace the top frame of the state stack."""
         stack = self._read_stack()
         frame: dict[str, object] = {"phase": phase.value, "task": task}
@@ -204,6 +205,12 @@ class PaperAuthoring(Workflow):
             frame["regions"] = [[f, p] for f, p in regions]
         elif "regions" in stack[-1]:
             frame["regions"] = stack[-1]["regions"]
+        # Preserve or update extra fields (description, note_link, etc.)
+        for key in ("description", "note_link", "plan_link", "subtasks"):
+            if key in extra:
+                frame[key] = extra[key]
+            elif key in stack[-1]:
+                frame[key] = stack[-1][key]
         stack[-1] = frame
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
 
@@ -324,6 +331,10 @@ class PaperAuthoring(Workflow):
         if not match:
             raise ValueError(f"Task '{note_id}' not found in To do")
         task_line = match.group(0)
+        # Extract description and note link from task line
+        desc_match = re.match(r"^- (.+?) \(\[note\]\((.+?)\)\)(.*)$", task_line)
+        description = desc_match.group(1) if desc_match else task_line[2:]
+        note_link = desc_match.group(2) if desc_match else None
         dashboard = dashboard.replace(task_line + "\n", "")
         # Add to In progress with 🔵
         dashboard = dashboard.replace(
@@ -333,7 +344,8 @@ class PaperAuthoring(Workflow):
         self.dashboard_path.write_text(dashboard)
         for file_path, passage in regions:
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
-        self._write_state(Phase.EDIT, note_id, regions=regions)
+        self._write_state(Phase.EDIT, note_id, regions=regions,
+                          description=description, note_link=note_link)
 
     def select_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review).
@@ -383,6 +395,11 @@ class PaperAuthoring(Workflow):
             if "plan" not in old_line:
                 dashboard = dashboard.replace(old_line, old_line + plan_link)
                 self.dashboard_path.write_text(dashboard)
+        plan_link_rel = f"plans/{plan_name}.md"
+        # Store plan link in parent frame
+        stack = self._read_stack()
+        stack[-1]["plan_link"] = plan_link_rel
+        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
         self._push_state(Phase.PLANNING, task)
         return plan_path
 
@@ -462,7 +479,15 @@ class PaperAuthoring(Workflow):
     # --- Subtasks ---
 
     def add_subtask(self, subtask_id: str, description: str) -> None:
-        """Add a subtask under the current in-progress task in the dashboard."""
+        """Add a subtask under the current in-progress task."""
+        # Update state.json
+        stack = self._read_stack()
+        frame = stack[-1]
+        subtasks = frame.get("subtasks", [])
+        subtasks.append({"id": subtask_id, "description": description})
+        frame["subtasks"] = subtasks
+        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        # Update dashboard
         dashboard = self._read_dashboard()
         in_progress_match = re.search(r"^(- 🔵 .*)$", dashboard, re.MULTILINE)
         if not in_progress_match:
@@ -515,7 +540,7 @@ class PaperAuthoring(Workflow):
         new_line = f"{indent}- {active_content}\n{child_indent}- 🔵 ⚙️ {reason}"
         dashboard = dashboard.replace(old_line, new_line)
         self.dashboard_path.write_text(dashboard)
-        self._push_state_raw(WORKFLOW_DEV_PHASE, reason)
+        self._push_state_raw(WORKFLOW_DEV_PHASE, reason, description=reason)
 
     def end_workflow_dev(self) -> None:
         """Remove workflow-dev child from dashboard; restore parent 🔵; pop state."""
@@ -606,10 +631,12 @@ class PaperAuthoring(Workflow):
             raise ValueError(f"No active task. Use {CMD_SELECT_TASK} or {CMD_SELECT_AD_HOC} first.")
 
 
-    def _push_state_raw(self, phase_str: str, task: str | None = None) -> None:
+    def _push_state_raw(self, phase_str: str, task: str | None = None, **extra: object) -> None:
         """Push a raw phase string (not necessarily a Phase enum member)."""
         stack = self._read_stack()
-        stack.append({"phase": phase_str, "task": task})
+        frame: dict[str, object] = {"phase": phase_str, "task": task}
+        frame.update(extra)
+        stack.append(frame)
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
 
 
