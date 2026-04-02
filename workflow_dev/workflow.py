@@ -8,6 +8,7 @@ Review is mandatory at both transitions: refactoringâ†’modifying and modifyingâ†
 State is externalised to state.json. Hooks consult phase to gate edits/writes.
 """
 
+import re
 import subprocess
 import sys
 from enum import Enum
@@ -90,7 +91,6 @@ class WorkflowDev(Workflow):
         """Regenerate the Current state section of the dashboard."""
         if not self.dashboard_path.exists():
             return
-        import re
         dashboard = self.dashboard_path.read_text()
         rendered = self._render_state()
         dashboard = re.sub(
