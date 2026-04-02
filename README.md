@@ -24,5 +24,72 @@ cp -r workflow/agent-workflows/paper-authoring/templates/todo workflow/
 Point your `CLAUDE.md` at the workflow:
 
 ```
-Follow `workflow/agent-workflows/paper-authoring/agent-teams-workflow.md` for all paper editing.
+Follow `workflow/agent-workflows/paper-authoring/workflow.md` for all paper editing.
 ```
+
+Configure Claude Code hooks in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 workflow/agent-workflows/paper-authoring/status_tracker.py startup"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 workflow/agent-workflows/paper-authoring/hooks/pre_edit.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 workflow/agent-workflows/paper-authoring/hooks/pre_write.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 workflow/agent-workflows/paper-authoring/hooks/post_edit.py"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Set up a GitHub fine-grained PAT for your repo's org in `.claude/settings.local.json` (gitignored):
+
+```json
+{
+  "env": {
+    "GH_TOKEN": "github_pat_..."
+  }
+}
+```
+
+Required PAT permissions (repository scope):
+- **Administration**: Read and write (repo creation)
+- **Contents**: Read and write (push code)
+- **Issues**: Read and write (task tracking via GitHub Issues)
+- **Workflows**: Read and write (if pushing GitHub Actions files)
