@@ -54,10 +54,48 @@ class WorkflowDev(Workflow):
     def __init__(self, project_root: Path):
         self.root = project_root
         self.state_path = project_root / "state.json"
+        self.dashboard_path = project_root / "dashboard.md"
         self._init_state(Phase.IDLE)
+        self._update_dashboard()
 
     def _phase_enum(self) -> type[Phase]:
         return Phase
+
+    # --- Dashboard ---
+
+    def _render_state(self) -> str:
+        """Render current state as a human-readable string."""
+        state = self.read_state()
+        phase = state["phase"]
+        task = state.get("task")
+        mode = state.get("mode")
+        if phase == Phase.IDLE.value:
+            return "(idle)"
+        parts = [f"**{phase}**"]
+        if task:
+            parts.append(f"task: {task}")
+        if mode:
+            parts.append(f"mode: {mode}")
+        return " · ".join(parts)
+
+    def _update_dashboard(self) -> None:
+        """Regenerate the Current state section of the dashboard."""
+        if not self.dashboard_path.exists():
+            return
+        import re
+        dashboard = self.dashboard_path.read_text()
+        rendered = self._render_state()
+        dashboard = re.sub(
+            r"(## Current state\n\n<!-- .* -->\n\n).*?(?=\n## |\Z)",
+            f"\\1{rendered}\n",
+            dashboard, flags=re.DOTALL,
+        )
+        self.dashboard_path.write_text(dashboard)
+
+    def _save_stack(self, stack: list[dict]) -> None:
+        """Write stack and update dashboard."""
+        super()._save_stack(stack)
+        self._update_dashboard()
 
     # --- Commands ---
 
