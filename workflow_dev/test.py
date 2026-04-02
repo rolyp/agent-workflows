@@ -134,7 +134,7 @@ class StateTransitionTest(TestFixture):
         self.assertEqual(state["phase"], "refactoring")
         self.assertEqual(state["task"], "task-1")
 
-    def test_feedback_on_modifying_review_returns_to_modifying(self):
+    def test_feedback_on_modifying_review_returns_to_refactoring(self):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
@@ -143,7 +143,7 @@ class StateTransitionTest(TestFixture):
         wd.request_review()
         wd.feedback()
         state = wd.read_state()
-        self.assertEqual(state["phase"], "modifying")
+        self.assertEqual(state["phase"], "refactoring")
         self.assertEqual(state["task"], "task-1")
 
     def test_invalid_transitions(self):

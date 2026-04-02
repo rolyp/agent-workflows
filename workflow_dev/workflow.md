@@ -55,20 +55,17 @@ idle ──start-task──► refactoring (locked)
                          ▼
                       review (all locked, reviewer runs)
                       │      │
-                  approve    feedback
-                      │          │
-                      ▼          ▼
-                 modifying    refactoring
+                  approve    feedback ──► refactoring
+                      │
+                      ▼
+                 modifying
                   │      │
   back-to-refactor  request-review (tests must pass)
           │              │
           ▼              ▼
      refactoring      review ──approve──► idle
                          │
-                      feedback
-                         │
-                         ▼
-                      modifying
+                      feedback ──► refactoring
 ```
 
 ### States
@@ -91,7 +88,7 @@ idle ──start-task──► refactoring (locked)
 | `refactor-code` | refactoring | refactoring (refactor-code) | — |
 | `request-review` | refactoring or modifying | review | Tests must pass |
 | `approve` | review | modifying (if reviewing refactoring) or idle (if reviewing modifying) | — |
-| `feedback` | review | refactoring (if reviewing refactoring) or modifying (if reviewing modifying) | — |
+| `feedback` | review | refactoring (locked) | — |
 | `back-to-refactor` | modifying | refactoring (locked) | — |
 
 ---
@@ -118,7 +115,7 @@ idle ──start-task──► refactoring (locked)
 - **Code Reviewer** examines work for consolidation, code smells, fragile implementations
 - Mandatory at both transitions: refactoring→modifying and modifying→idle
 - `approve` → modifying (post-refactoring) or idle (post-modifying)
-- `feedback` → back to refactoring (post-refactoring) or modifying (post-modifying)
+- `feedback` → always back to refactoring (fixes are refactoring by definition)
 - `request-review` output reminds **Dev Assistant** to invoke `/code-review`
 
 ---

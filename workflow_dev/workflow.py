@@ -154,15 +154,12 @@ class WorkflowDev(Workflow):
             self._write_state(Phase.IDLE)
 
     def feedback(self) -> None:
-        """Review feedback; return to where we came from."""
+        """Review feedback; always return to refactoring (fixes are refactoring by definition)."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"feedback only available during review (current: {phase.value})")
         state = self.read_state()
-        if state.get("review_of") == Phase.REFACTORING.value:
-            self._write_state(Phase.REFACTORING, state.get("task"))
-        else:
-            self._write_state(Phase.MODIFYING, state.get("task"))
+        self._write_state(Phase.REFACTORING, state.get("task"))
 
     # --- Hook gates ---
 
