@@ -3,9 +3,6 @@
 from abc import ABC, abstractmethod
 
 # Phase value for workflow development (shared across implementations)
-WORKFLOW_DEV_PHASE = "workflow_dev"
-
-
 class Workflow(ABC):
     @abstractmethod
     def check_edit(self, file_path: str, old_string: str | None = None,
