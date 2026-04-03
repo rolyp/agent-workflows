@@ -620,6 +620,35 @@ class GitHubIssuesTest(TestFixture):
 
     @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
     @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
+    def test_structural_entries_get_only_their_own_issue_url(self, mock_create, mock_repo):
+        """Each structural entry should have exactly one [issue] link."""
+        mock_repo.return_value = "owner/repo"
+        mock_create.side_effect = [
+            "https://github.com/owner/repo/issues/1",  # structural s-1
+            "https://github.com/owner/repo/issues/2",  # structural s-2
+            "https://github.com/owner/repo/issues/3",  # minor batch
+        ]
+        tracker = self._make_tracker_with_tasks()
+        tracker.approve_triage()
+        dashboard = tracker._read_dashboard()
+
+        # Each structural entry should have exactly one [issue] link
+        structural_lines = [
+            l for l in dashboard.split("\n")
+            if "Fix introduction argument" in l or "Restructure related work" in l
+        ]
+        for line in structural_lines:
+            count = line.count("[issue]")
+            self.assertEqual(count, 1, f"Expected exactly 1 [issue] link: {line}")
+
+        # Structural entries should have their own URLs, not the minor batch URL
+        self.assertIn("issues/1", structural_lines[0])
+        self.assertIn("issues/2", structural_lines[1])
+        self.assertNotIn("issues/3", structural_lines[0])
+        self.assertNotIn("issues/3", structural_lines[1])
+
+    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
+    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
     def test_approve_triage_no_tasks_skips(self, mock_create, mock_repo):
         """If no tasks in To Do, no issues created."""
         mock_repo.return_value = "owner/repo"
