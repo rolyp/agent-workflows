@@ -113,12 +113,21 @@ class WorkflowDev(Workflow):
 
     # --- Commands ---
 
-    def start_task(self, task: str) -> None:
-        """Start a task; enter refactoring phase (locked until sub-mode chosen)."""
+    def start_task(self, task: str, issue_number: str | None = None) -> None:
+        """Start a task; enter refactoring phase (locked until sub-mode chosen).
+
+        If issue_number is provided, stores the issue URL in state and
+        sets project status to In Progress.
+        """
         phase = self._read_phase()
         if phase is not Phase.IDLE:
             raise ValueError(f"Cannot start task: current phase is {phase.value}, expected idle")
-        self._write_state(Phase.REFACTORING, task)
+        issue_url = None
+        if issue_number:
+            repo = self.get_repo()
+            issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+            self.set_issue_status(issue_url, "In Progress")
+        self._write_state(Phase.REFACTORING, task, issue_url=issue_url)
 
     def expand_coverage(self) -> None:
         """Switch to expand-coverage mode: only test files editable."""
@@ -136,8 +145,13 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.REFACTOR_CODE.value)
 
+    def _issue_url_from_state(self) -> str | None:
+        """Get issue URL from the bottom of the state stack (root task)."""
+        stack = self._read_stack()
+        return stack[0].get("issue_url")
+
     def begin_step(self, name: str) -> None:
-        """Begin a named refactoring step. Pushes a frame; enforces single-step focus."""
+        """Begin a named refactoring step. Pushes a frame; adds todo to issue."""
         phase = self._read_phase()
         if phase is not Phase.REFACTORING:
             raise ValueError(f"begin-step only available during refactoring (current: {phase.value})")
@@ -148,17 +162,24 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         self._push_state(Phase.REFACTORING, state.get("task"), step=name,
                          mode=state.get("mode"))
+        issue_url = self._issue_url_from_state()
+        if issue_url:
+            self.add_issue_todos(issue_url, [name])
 
     def end_step(self) -> None:
-        """End the current refactoring step. Runs tests, pops the frame."""
+        """End the current refactoring step. Runs tests, checks off todo on issue."""
         phase = self._read_phase()
         if phase is not Phase.REFACTORING:
             raise ValueError(f"end-step only available during refactoring (current: {phase.value})")
         stack = self._read_stack()
         if len(stack) <= 1:
             raise ValueError("No step in progress. Use `begin-step <name>` first.")
+        step_name = stack[-1].get("step")
         self._run_tests()
         self._pop_state()
+        issue_url = self._issue_url_from_state()
+        if issue_url and step_name:
+            self.check_issue_todo(issue_url, step_name)
 
     def begin_modify(self, description: str) -> None:
         """Enter modifying phase with explicit scope."""
@@ -197,17 +218,31 @@ class WorkflowDev(Workflow):
             raise ValueError(f"approve only available during review (current: {phase.value})")
         state = self.read_state()
         if state.get("review_of") == Phase.MODIFYING.value:
+            # Task complete — set issue to Done and close
+            issue_url = self._issue_url_from_state()
+            if issue_url:
+                self.set_issue_status(issue_url, "Done")
+                env = self._gh_env()
+                number = self._get_issue_number(issue_url)
+                subprocess.run(
+                    ["gh", "issue", "close", number, "--repo", self.get_repo()],
+                    capture_output=True, text=True, env=env,
+                )
             self._write_state(Phase.IDLE)
         else:
             self._write_state(Phase.REFACTORING, state.get("task"))
 
-    def feedback(self) -> None:
-        """Review feedback; always return to refactoring (fixes are refactoring by definition)."""
+    def feedback(self, items: list[str] | None = None) -> None:
+        """Review feedback; return to refactoring. Optionally add todo items for fixes."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"feedback only available during review (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"))
+        if items:
+            issue_url = self._issue_url_from_state()
+            if issue_url:
+                self.add_issue_todos(issue_url, items)
 
     # --- Hook gates ---
 
@@ -380,10 +415,14 @@ def main() -> None:
         print(summary)
     elif command == CMD_START_TASK:
         if len(sys.argv) < 3:
-            print(f"Usage: workflow.py {CMD_START_TASK} <task-name>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_START_TASK} <task-name> [issue-number]", file=sys.stderr)
             sys.exit(1)
-        wd.start_task(sys.argv[2])
-        print(f"Started task: {sys.argv[2]} (refactoring, locked)")
+        issue_number = sys.argv[3] if len(sys.argv) > 3 else None
+        wd.start_task(sys.argv[2], issue_number)
+        msg = f"Started task: {sys.argv[2]} (refactoring, locked)"
+        if issue_number:
+            msg += f" · issue #{issue_number} → In Progress"
+        print(msg)
     elif command == CMD_EXPAND_COVERAGE:
         wd.expand_coverage()
         print("Mode: expand-coverage (test files only)")
@@ -418,8 +457,12 @@ def main() -> None:
         phase = wd.read_state()["phase"]
         print(f"Review approved; entering {phase}")
     elif command == CMD_FEEDBACK:
-        wd.feedback()
-        print("Review feedback; returning to refactoring (locked)")
+        items = sys.argv[2:] if len(sys.argv) > 2 else None
+        wd.feedback(items)
+        msg = "Review feedback; returning to refactoring (locked)"
+        if items:
+            msg += f" · {len(items)} todo(s) added to issue"
+        print(msg)
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         sys.exit(1)

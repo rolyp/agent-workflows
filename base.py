@@ -292,6 +292,70 @@ class Workflow(ABC):
         item_id = self._find_project_item(issue_url, env)
         self._set_item_status(item_id, status, env)
 
+    # --- Issue body management ---
+
+    def _get_issue_number(self, issue_url: str) -> str:
+        """Extract issue number from URL."""
+        _, _, number = self._parse_issue_url(issue_url)
+        return number
+
+    def add_issue_todos(self, issue_url: str, items: list[str]) -> None:
+        """Append unchecked todo items to an issue body."""
+        repo = self.get_repo()
+        env = self._gh_env()
+        number = self._get_issue_number(issue_url)
+
+        # Read current body
+        result = subprocess.run(
+            ["gh", "issue", "view", number, "--repo", repo,
+             "--json", "body", "--jq", ".body"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to read issue body: {result.stderr}")
+
+        body = result.stdout.rstrip()
+        new_items = "\n".join(f"- [ ] {item}" for item in items)
+        if body:
+            body += "\n" + new_items
+        else:
+            body = new_items
+
+        result = subprocess.run(
+            ["gh", "issue", "edit", number, "--repo", repo, "--body", body],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to update issue body: {result.stderr}")
+
+    def check_issue_todo(self, issue_url: str, item: str) -> None:
+        """Check off a todo item in an issue body."""
+        repo = self.get_repo()
+        env = self._gh_env()
+        number = self._get_issue_number(issue_url)
+
+        result = subprocess.run(
+            ["gh", "issue", "view", number, "--repo", repo,
+             "--json", "body", "--jq", ".body"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to read issue body: {result.stderr}")
+
+        body = result.stdout.rstrip()
+        unchecked = f"- [ ] {item}"
+        checked = f"- [x] {item}"
+        if unchecked not in body:
+            raise RuntimeError(f"Todo item not found in issue: {unchecked}")
+        body = body.replace(unchecked, checked, 1)
+
+        result = subprocess.run(
+            ["gh", "issue", "edit", number, "--repo", repo, "--body", body],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to update issue body: {result.stderr}")
+
     # --- Abstract interface ---
 
     @abstractmethod
