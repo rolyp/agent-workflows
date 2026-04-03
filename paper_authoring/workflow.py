@@ -727,19 +727,6 @@ class PaperAuthoring(Workflow):
 
     # --- GitHub Issues integration ---
 
-    def _get_repo(self) -> str:
-        """Detect owner/repo from git remote."""
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, cwd=self.root,
-        )
-        url = result.stdout.strip()
-        # Handle both SSH and HTTPS formats
-        match = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
-        if not match:
-            raise ValueError(f"Cannot parse repo from remote URL: {url}")
-        return match.group(1)
-
     def _parse_todo_tasks(self, dashboard: str, section: str) -> list[dict]:
         """Parse tasks from a dashboard To Do section.
 
@@ -776,19 +763,6 @@ class PaperAuthoring(Workflow):
         match = re.search(pattern, text, re.DOTALL)
         return match.group(1).strip() if match else ""
 
-    def _gh_issue_create(self, repo: str, title: str, body: str) -> str:
-        """Create a GitHub issue; return its URL."""
-        result = subprocess.run(
-            ["gh", "issue", "create",
-             "--repo", repo,
-             "--title", title,
-             "--body", body],
-            capture_output=True, text=True, cwd=self.root,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"gh issue create failed: {result.stderr}")
-        return result.stdout.strip()
-
     def _format_dashboard_entry(self, task: dict, issue_url: str | None = None) -> str:
         """Format a dashboard entry line from a parsed task dict."""
         entry = (
@@ -802,17 +776,12 @@ class PaperAuthoring(Workflow):
 
     def create_github_issues(self) -> None:
         """Create GitHub Issues for all To Do tasks and store URLs in dashboard."""
-        try:
-            repo = self._get_repo()
-        except ValueError:
-            return  # no git remote; skip silently
-
         dashboard = self._read_dashboard()
 
         # Structural tasks: one issue each
         for task in self._parse_todo_tasks(dashboard, "Structural"):
             body = self._read_note_body(task["note_file"], task["note_id"])
-            url = self._gh_issue_create(repo, task["description"], body)
+            url = self.create_issue(task["description"], body)
             old_entry = self._format_dashboard_entry(task)
             new_entry = self._format_dashboard_entry(task, issue_url=url)
             dashboard = dashboard.replace(old_entry, new_entry, 1)
@@ -821,9 +790,7 @@ class PaperAuthoring(Workflow):
         minor_tasks = self._parse_todo_tasks(dashboard, "Minor")
         if minor_tasks:
             body_lines = [f"- [ ] {t['description']}" for t in minor_tasks]
-            url = self._gh_issue_create(
-                repo, "Minor issues", "\n".join(body_lines)
-            )
+            url = self.create_issue("Minor issues", "\n".join(body_lines))
             for task in minor_tasks:
                 old_entry = self._format_dashboard_entry(task)
                 new_entry = self._format_dashboard_entry(task, issue_url=url)

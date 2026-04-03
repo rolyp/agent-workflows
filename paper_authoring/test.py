@@ -555,10 +555,8 @@ class GitHubIssuesTest(TestFixture):
         tracker.begin_triage()
         return tracker
 
-    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
-    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
-    def test_approve_triage_creates_structural_issues(self, mock_create, mock_repo):
-        mock_repo.return_value = "owner/repo"
+    @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
+    def test_approve_triage_creates_structural_issues(self, mock_create):
         mock_create.side_effect = [
             "https://github.com/owner/repo/issues/1",
             "https://github.com/owner/repo/issues/2",
@@ -572,23 +570,21 @@ class GitHubIssuesTest(TestFixture):
 
         # First structural issue
         args1 = mock_create.call_args_list[0]
-        self.assertEqual(args1[0][1], "Fix introduction argument")
-        self.assertIn("first issue", args1[0][2])
+        self.assertEqual(args1[0][0], "Fix introduction argument")
+        self.assertIn("first issue", args1[0][1])
 
         # Second structural issue
         args2 = mock_create.call_args_list[1]
-        self.assertEqual(args2[0][1], "Restructure related work")
+        self.assertEqual(args2[0][0], "Restructure related work")
 
         # Minor batch issue
         args3 = mock_create.call_args_list[2]
-        self.assertEqual(args3[0][1], "Minor issues")
-        self.assertIn("- [ ] Fix typo on page 3", args3[0][2])
-        self.assertIn("- [ ] Add missing citation", args3[0][2])
+        self.assertEqual(args3[0][0], "Minor issues")
+        self.assertIn("- [ ] Fix typo on page 3", args3[0][1])
+        self.assertIn("- [ ] Add missing citation", args3[0][1])
 
-    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
-    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
-    def test_approve_triage_stores_urls_in_dashboard(self, mock_create, mock_repo):
-        mock_repo.return_value = "owner/repo"
+    @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
+    def test_approve_triage_stores_urls_in_dashboard(self, mock_create):
         mock_create.side_effect = [
             "https://github.com/owner/repo/issues/1",
             "https://github.com/owner/repo/issues/2",
@@ -602,27 +598,25 @@ class GitHubIssuesTest(TestFixture):
         self.assertIn("[issue](https://github.com/owner/repo/issues/2)", dashboard)
         self.assertIn("[issue](https://github.com/owner/repo/issues/3)", dashboard)
 
-    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
-    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
-    def test_approve_triage_transitions_to_idle(self, mock_create, mock_repo):
-        mock_repo.return_value = "owner/repo"
+    @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
+    def test_approve_triage_transitions_to_idle(self, mock_create):
         mock_create.return_value = "https://github.com/owner/repo/issues/1"
         tracker = self._make_tracker_with_tasks()
         tracker.approve_triage()
         self.assertEqual(tracker.read_state()["phase"], "idle")
 
-    def test_approve_triage_no_repo_skips_silently(self):
-        """If no git remote, triage still completes without creating issues."""
-        tracker = self._make_tracker_with_tasks()
-        # No git repo in test_dir, so _get_repo will fail
+    @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
+    def test_approve_triage_no_tasks_creates_no_issues(self, mock_create):
+        """If no tasks in To Do, no issues created but triage completes."""
+        tracker = self._make_tracker()
+        tracker.begin_triage()
         tracker.approve_triage()
+        mock_create.assert_not_called()
         self.assertEqual(tracker.read_state()["phase"], "idle")
 
-    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
-    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
-    def test_structural_entries_get_only_their_own_issue_url(self, mock_create, mock_repo):
+    @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
+    def test_structural_entries_get_only_their_own_issue_url(self, mock_create):
         """Each structural entry should have exactly one [issue] link."""
-        mock_repo.return_value = "owner/repo"
         mock_create.side_effect = [
             "https://github.com/owner/repo/issues/1",  # structural s-1
             "https://github.com/owner/repo/issues/2",  # structural s-2
@@ -647,12 +641,3 @@ class GitHubIssuesTest(TestFixture):
         self.assertNotIn("issues/3", structural_lines[0])
         self.assertNotIn("issues/3", structural_lines[1])
 
-    @patch("paper_authoring.workflow.PaperAuthoring._get_repo")
-    @patch("paper_authoring.workflow.PaperAuthoring._gh_issue_create")
-    def test_approve_triage_no_tasks_skips(self, mock_create, mock_repo):
-        """If no tasks in To Do, no issues created."""
-        mock_repo.return_value = "owner/repo"
-        tracker = self._make_tracker()
-        tracker.begin_triage()
-        tracker.approve_triage()
-        mock_create.assert_not_called()
