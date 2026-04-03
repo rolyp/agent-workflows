@@ -30,9 +30,12 @@ Follow whenever working on the agent-workflows submodule. See [dashboard](../das
 - Edits scoped to `workflow/agent-workflows/` within the parent repo (enforced by `WorkflowDev.check_edit` / `check_write` via hooks)
 - When running from the submodule directly: all files are in scope
 
-### Testing
-- Run `python3 -m pytest` from the workflow directory before committing
-- When modifying a workflow class: update or add tests in the corresponding `test.py`
+### Testing and CI
+- `test.sh` runs mypy + pytest; used by `end-step` and `request-review` gates
+- After `git push`, run `gh run watch --exit-status --repo rolyp/agent-workflows` as a background Bash command to monitor CI (background Bash inherits env; background Agents do not)
+
+### Priorities
+- Workflow integrity fixes have multiplicative benefit — always address them before feature work, never defer to a backlog
 
 ### Host repo integration
 - This repo is a submodule of `explorable-viz/literate-execution` at `workflow/agent-workflows/`

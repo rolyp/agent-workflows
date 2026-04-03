@@ -16,7 +16,7 @@ Follow the [workflow phases](../../workflow.md#phases) and [state machine](../..
 
 ## CI protocol
 
-After every `git push`, spawn a background agent to watch CI:
+After every `git push`, run CI watcher as a **background Bash command** (not a background Agent — agents don't inherit env vars):
 ```
 gh run watch --exit-status --repo rolyp/agent-workflows
 ```
