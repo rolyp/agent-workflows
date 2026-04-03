@@ -42,6 +42,8 @@ CMD_EXPAND_COVERAGE = "expand-coverage"
 CMD_REFACTOR_CODE = "refactor-code"
 CMD_BEGIN_STEP = "begin-step"
 CMD_END_STEP = "end-step"
+CMD_BEGIN_SUBTASK = "begin-subtask"
+CMD_END_SUBTASK = "end-subtask"
 CMD_BEGIN_MODIFY = "begin-modify"
 CMD_BACK_TO_REFACTOR = "back-to-refactor"
 CMD_REQUEST_REVIEW = "request-review"
@@ -178,7 +180,7 @@ class WorkflowDev(Workflow):
             self.clear_issue_labels(issue_url)
 
     def begin_step(self, name: str) -> None:
-        """Begin a named refactoring step. Pushes a frame; adds todo to issue."""
+        """Begin a named refactoring step. Pushes a frame; marks todo as active."""
         phase = self._read_phase()
         if phase is not Phase.REFACTORING:
             raise ValueError(f"begin-step only available during refactoring (current: {phase.value})")
@@ -191,10 +193,10 @@ class WorkflowDev(Workflow):
                          mode=state.get("mode"))
         issue_url = self._issue_url_from_state()
         if issue_url:
-            self.add_issue_todos(issue_url, [name])
+            self.activate_issue_todo(issue_url, name)
 
     def end_step(self) -> None:
-        """End the current refactoring step. Runs tests, checks off todo on issue."""
+        """End the current refactoring step. Runs tests, checks off todo."""
         phase = self._read_phase()
         if phase is not Phase.REFACTORING:
             raise ValueError(f"end-step only available during refactoring (current: {phase.value})")
@@ -206,7 +208,41 @@ class WorkflowDev(Workflow):
         self._pop_state()
         issue_url = self._issue_url_from_state()
         if issue_url and step_name:
-            self.check_issue_todo(issue_url, step_name)
+            self.complete_issue_todo(issue_url, step_name)
+
+    def begin_subtask(self, title: str) -> str:
+        """Create a sub-issue for a substantial subtask. Returns the sub-issue URL."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"begin-subtask only available during refactoring (current: {phase.value})")
+        issue_url = self._issue_url_from_state()
+        if not issue_url:
+            raise ValueError("No issue URL in state; use start-task with an issue number first")
+        sub_url = self.create_sub_issue(issue_url, title)
+        state = self.read_state()
+        self._push_state(Phase.REFACTORING, state.get("task"),
+                         issue_url=sub_url, mode=state.get("mode"))
+        self.set_issue_label(sub_url, "idle")
+        self.set_issue_status(sub_url, "In Progress")
+        return sub_url
+
+    def end_subtask(self) -> None:
+        """Complete the current subtask. Closes the sub-issue."""
+        stack = self._read_stack()
+        if len(stack) <= 1:
+            raise ValueError("No subtask in progress.")
+        self._run_tests()
+        issue_url = self._issue_url_from_state()
+        self._pop_state()
+        if issue_url:
+            self.set_issue_status(issue_url, "Done")
+            self.clear_issue_labels(issue_url)
+            env = self._gh_env()
+            number = self._get_issue_number(issue_url)
+            subprocess.run(
+                ["gh", "issue", "close", number, "--repo", self.get_repo()],
+                capture_output=True, text=True, env=env,
+            )
 
     def begin_modify(self, description: str) -> None:
         """Enter modifying phase with explicit scope."""
@@ -471,6 +507,15 @@ def main() -> None:
     elif command == CMD_END_STEP:
         wd.end_step()
         print("Step complete; tests passed")
+    elif command == CMD_BEGIN_SUBTASK:
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_BEGIN_SUBTASK} <title>", file=sys.stderr)
+            sys.exit(1)
+        url = wd.begin_subtask(sys.argv[2])
+        print(f"Started subtask: {sys.argv[2]} → {url}")
+    elif command == CMD_END_SUBTASK:
+        wd.end_subtask()
+        print("Subtask complete; sub-issue closed")
     elif command == CMD_BEGIN_MODIFY:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_BEGIN_MODIFY} <description>", file=sys.stderr)

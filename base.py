@@ -349,67 +349,108 @@ class Workflow(ABC):
 
     # --- Issue body management ---
 
+    ACTIVE_MARKER = "\U0001f535"  # 🔵
+
     def _get_issue_number(self, issue_url: str) -> str:
         """Extract issue number from URL."""
         _, _, number = self._parse_issue_url(issue_url)
         return number
 
+    def _read_issue_body(self, issue_url: str) -> str:
+        """Read an issue's body text."""
+        repo = self.get_repo()
+        env = self._gh_env()
+        number = self._get_issue_number(issue_url)
+        result = subprocess.run(
+            ["gh", "issue", "view", number, "--repo", repo,
+             "--json", "body", "--jq", ".body"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to read issue body: {result.stderr}")
+        return result.stdout.rstrip()
+
+    def _write_issue_body(self, issue_url: str, body: str) -> None:
+        """Write an issue's body text."""
+        repo = self.get_repo()
+        env = self._gh_env()
+        number = self._get_issue_number(issue_url)
+        result = subprocess.run(
+            ["gh", "issue", "edit", number, "--repo", repo, "--body", body],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to update issue body: {result.stderr}")
+
     def add_issue_todos(self, issue_url: str, items: list[str]) -> None:
         """Append unchecked todo items to an issue body."""
-        repo = self.get_repo()
-        env = self._gh_env()
-        number = self._get_issue_number(issue_url)
-
-        # Read current body
-        result = subprocess.run(
-            ["gh", "issue", "view", number, "--repo", repo,
-             "--json", "body", "--jq", ".body"],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to read issue body: {result.stderr}")
-
-        body = result.stdout.rstrip()
+        body = self._read_issue_body(issue_url)
         new_items = "\n".join(f"- [ ] {item}" for item in items)
-        if body:
-            body += "\n" + new_items
+        body = f"{body}\n{new_items}" if body else new_items
+        self._write_issue_body(issue_url, body)
+
+    def activate_issue_todo(self, issue_url: str, item: str) -> None:
+        """Mark a todo as active (🔵), deactivating any other."""
+        body = self._read_issue_body(issue_url)
+        # Remove any existing active marker
+        body = body.replace(f" {self.ACTIVE_MARKER}", "")
+        # Add marker to the target item
+        target = f"- [ ] {item}"
+        if target not in body:
+            # Item doesn't exist yet — add it
+            body = f"{body}\n- [ ] {self.ACTIVE_MARKER} {item}" if body else f"- [ ] {self.ACTIVE_MARKER} {item}"
         else:
-            body = new_items
+            body = body.replace(target, f"- [ ] {self.ACTIVE_MARKER} {item}", 1)
+        self._write_issue_body(issue_url, body)
 
-        result = subprocess.run(
-            ["gh", "issue", "edit", number, "--repo", repo, "--body", body],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to update issue body: {result.stderr}")
+    def complete_issue_todo(self, issue_url: str, item: str) -> None:
+        """Check off a todo item, removing active marker if present."""
+        body = self._read_issue_body(issue_url)
+        # Match with or without active marker
+        active_unchecked = f"- [ ] {self.ACTIVE_MARKER} {item}"
+        plain_unchecked = f"- [ ] {item}"
+        checked = f"- [x] {item}"
+        if active_unchecked in body:
+            body = body.replace(active_unchecked, checked, 1)
+        elif plain_unchecked in body:
+            body = body.replace(plain_unchecked, checked, 1)
+        else:
+            raise RuntimeError(f"Todo item not found in issue: {plain_unchecked}")
+        self._write_issue_body(issue_url, body)
 
-    def check_issue_todo(self, issue_url: str, item: str) -> None:
-        """Check off a todo item in an issue body."""
+    def get_active_todo(self, issue_url: str) -> str | None:
+        """Return the name of the active (🔵) todo, or None."""
+        body = self._read_issue_body(issue_url)
+        marker = self.ACTIVE_MARKER
+        for line in body.split("\n"):
+            if f"- [ ] {marker} " in line:
+                return line.split(f"- [ ] {marker} ", 1)[1].strip()
+        return None
+
+    # --- Sub-issue management ---
+
+    def create_sub_issue(self, parent_url: str, title: str, body: str = "") -> str:
+        """Create a sub-issue under a parent issue. Returns the new issue URL."""
+        issue_url = self.create_issue(title, body)
+        # Link as sub-issue via GitHub's sub-issue API
+        parent_number = self._get_issue_number(parent_url)
+        child_number = self._get_issue_number(issue_url)
         repo = self.get_repo()
         env = self._gh_env()
-        number = self._get_issue_number(issue_url)
-
+        # Use the REST API to add sub-issue relationship
+        owner, repo_name, _ = self._parse_issue_url(parent_url)
         result = subprocess.run(
-            ["gh", "issue", "view", number, "--repo", repo,
-             "--json", "body", "--jq", ".body"],
+            ["gh", "api", "--method", "POST",
+             f"repos/{owner}/{repo_name}/issues/{parent_number}/sub_issues",
+             "-f", f"sub_issue_id={child_number}"],
             capture_output=True, text=True, env=env,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to read issue body: {result.stderr}")
-
-        body = result.stdout.rstrip()
-        unchecked = f"- [ ] {item}"
-        checked = f"- [x] {item}"
-        if unchecked not in body:
-            raise RuntimeError(f"Todo item not found in issue: {unchecked}")
-        body = body.replace(unchecked, checked, 1)
-
-        result = subprocess.run(
-            ["gh", "issue", "edit", number, "--repo", repo, "--body", body],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to update issue body: {result.stderr}")
+            # Sub-issues API may not be available; fall back to mentioning in body
+            child_body = self._read_issue_body(issue_url)
+            child_body = f"Parent: #{parent_number}\n\n{child_body}" if child_body else f"Parent: #{parent_number}"
+            self._write_issue_body(issue_url, child_body)
+        return issue_url
 
     # --- Abstract interface ---
 
