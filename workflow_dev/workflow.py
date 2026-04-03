@@ -256,10 +256,10 @@ class WorkflowDev(Workflow):
         phase = self._read_phase()
         if phase is not Phase.REFACTORING:
             raise ValueError(f"end-step only available during refactoring (current: {phase.value})")
-        stack = self._read_stack()
-        if len(stack) <= 1:
+        state = self.read_state()
+        if not state.get("step"):
             raise ValueError("No step in progress. Use `begin-step <name>` first.")
-        step_name = stack[-1].get("step")
+        step_name = state.get("step")
         self._run_tests()
         self._pop_state()
         issue_url = self._issue_url_from_state()
