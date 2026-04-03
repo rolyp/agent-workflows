@@ -22,6 +22,10 @@ class TestFixture(unittest.TestCase):
         shutil.rmtree(self.test_dir)
 
     def _make_wd(self) -> WorkflowDev:
+        # Create minimal test.sh so _run_tests succeeds in temp dir
+        test_sh = self.test_dir / "test.sh"
+        test_sh.write_text("#!/bin/bash\nexit 0\n")
+        test_sh.chmod(0o755)
         return WorkflowDev(self.test_dir)
 
 

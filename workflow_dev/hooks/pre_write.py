@@ -17,10 +17,7 @@ def main() -> None:
     if not file_path:
         return
 
-    try:
-        wd = WorkflowDev(Path.cwd())
-    except Exception:
-        return  # fail open
+    wd = WorkflowDev(Path.cwd())
 
     allowed, message = wd.check_write(file_path)
 

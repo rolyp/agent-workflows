@@ -299,7 +299,7 @@ class WorkflowDev(Workflow):
         """Run test.sh (mypy + pytest); raise if anything fails."""
         test_script = self.root / "test.sh"
         if not test_script.exists():
-            return
+            raise FileNotFoundError(f"test.sh not found at {test_script}")
         result = subprocess.run(
             ["bash", str(test_script)],
             capture_output=True, text=True, cwd=self.root,
@@ -319,7 +319,7 @@ class WorkflowDev(Workflow):
 
         gh_token = os.environ.get("GH_TOKEN", "")
         if not gh_token:
-            return  # can't check without token
+            raise RuntimeError("GH_TOKEN not set; cannot verify CI status")
 
         # Poll until run completes
         while True:
@@ -331,7 +331,9 @@ class WorkflowDev(Workflow):
                 env={**os.environ, "GH_TOKEN": gh_token},
             )
             if result.returncode != 0:
-                break  # fail open if gh command fails
+                raise RuntimeError(
+                    f"Failed to check CI run {run_id}: {result.stderr}"
+                )
 
             parts = result.stdout.strip().split()
             status = parts[0] if parts else "unknown"
