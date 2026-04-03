@@ -32,7 +32,9 @@ Follow whenever working on the agent-workflows submodule. See [dashboard](../das
 
 ### Testing and CI
 - `test.sh` runs mypy + pytest; used by `end-step` and `request-review` gates
-- After `git push`, run `gh run watch --exit-status --repo rolyp/agent-workflows` as a background Bash command to monitor CI (background Bash inherits env; background Agents do not)
+- Post-push hook records pending CI run ID in `state.json`
+- `request-review` blocks until pending CI run completes; fails if CI is red
+- `settings.local.json` env vars (including `GH_TOKEN`) are available to hooks and workflow commands but not to Bash tool calls or background tasks
 
 ### Priorities
 - Workflow integrity fixes have multiplicative benefit — always address them before feature work, never defer to a backlog

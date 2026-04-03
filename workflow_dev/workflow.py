@@ -8,9 +8,11 @@ Review is mandatory at both transitions: refactoringâ†’modifying and modifyingâ†
 State is externalised to state.json. Hooks consult phase to gate edits/writes.
 """
 
+import os
 import re
 import subprocess
 import sys
+import time
 from enum import Enum
 from pathlib import Path
 
@@ -175,7 +177,7 @@ class WorkflowDev(Workflow):
         self._write_state(Phase.REFACTORING, state.get("task"))
 
     def request_review(self) -> None:
-        """Request code review from refactoring or modifying. Runs tests first."""
+        """Request code review from refactoring or modifying. Runs tests and checks CI first."""
         phase = self._read_phase()
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"request-review only available during refactoring or modifying (current: {phase.value})")
@@ -184,6 +186,7 @@ class WorkflowDev(Workflow):
             current_step = stack[-1].get("step")
             raise ValueError(f"Step '{current_step}' still in progress. Run `end-step` first.")
         self._run_tests()
+        self._check_ci()
         state = self.read_state()
         self._write_state(Phase.REVIEW, state.get("task"), review_of=phase.value)
 
@@ -306,6 +309,48 @@ class WorkflowDev(Workflow):
                 f"Build check failed.\n"
                 f"{result.stdout}{result.stderr}"
             )
+
+    def _check_ci(self) -> None:
+        """Check pending CI run if recorded by post-push hook. Blocks until complete."""
+        state = self.read_state()
+        run_id = state.get("pending_ci_run")
+        if not run_id:
+            return
+
+        gh_token = os.environ.get("GH_TOKEN", "")
+        if not gh_token:
+            return  # can't check without token
+
+        # Poll until run completes
+        while True:
+            result = subprocess.run(
+                ["gh", "run", "view", str(run_id),
+                 "--json", "status,conclusion",
+                 "-q", ".status + \" \" + .conclusion"],
+                capture_output=True, text=True,
+                env={**os.environ, "GH_TOKEN": gh_token},
+            )
+            if result.returncode != 0:
+                break  # fail open if gh command fails
+
+            parts = result.stdout.strip().split()
+            status = parts[0] if parts else "unknown"
+            conclusion = parts[1] if len(parts) > 1 else ""
+
+            if status == "completed":
+                # Clear pending run
+                stack = self._read_stack()
+                stack[-1].pop("pending_ci_run", None)
+                self._save_stack(stack)
+
+                if conclusion != "success":
+                    raise RuntimeError(
+                        f"CI run {run_id} failed ({conclusion}). "
+                        f"Fix before requesting review: gh run view {run_id}"
+                    )
+                return
+
+            time.sleep(10)
 
 
 # --- CLI entry point ---

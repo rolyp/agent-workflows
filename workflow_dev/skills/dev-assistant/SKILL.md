@@ -16,11 +16,7 @@ Follow the [workflow phases](../../workflow.md#phases) and [state machine](../..
 
 ## CI protocol
 
-After every `git push`, run CI watcher as a **background Bash command** (not a background Agent — agents don't inherit env vars):
-```
-gh run watch --exit-status --repo rolyp/agent-workflows
-```
-The post-push hook will remind you. If CI fails, investigate before continuing.
+Post-push hook automatically records the CI run ID. `request-review` will block until CI passes. If CI fails, `request-review` will report the failure and you must fix before proceeding.
 
 ## Working with other skills
 

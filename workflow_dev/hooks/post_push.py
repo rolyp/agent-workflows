@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-"""PostToolUse hook for Bash. Reminds Dev Assistant to watch CI after git push."""
+"""PostToolUse hook for Bash. Records pending CI run after git push."""
 
 import json
+import os
+import subprocess
 import sys
+import time
+from pathlib import Path
+
+# Add agent-workflows root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from workflow_dev.workflow import WorkflowDev
 
 
 def main() -> None:
@@ -12,11 +21,36 @@ def main() -> None:
     if "git push" not in command:
         return
 
-    print(
-        "CI triggered. Spawn a background agent to watch: "
-        "gh run watch --exit-status --repo rolyp/agent-workflows",
-        file=sys.stderr,
+    gh_token = os.environ.get("GH_TOKEN", "")
+    if not gh_token:
+        print("CI: no GH_TOKEN, cannot track run", file=sys.stderr)
+        return
+
+    # Brief wait for run to register
+    time.sleep(3)
+
+    result = subprocess.run(
+        ["gh", "run", "list", "--limit", "1",
+         "--json", "databaseId,status",
+         "-q", ".[0].databaseId"],
+        capture_output=True, text=True,
+        env={**os.environ, "GH_TOKEN": gh_token},
     )
+    if result.returncode != 0 or not result.stdout.strip():
+        print("CI: could not determine run ID", file=sys.stderr)
+        return
+
+    run_id = result.stdout.strip()
+
+    # Record pending run in state
+    try:
+        wd = WorkflowDev(Path.cwd())
+        stack = wd._read_stack()
+        stack[-1]["pending_ci_run"] = run_id
+        wd._save_stack(stack)
+        print(f"CI: run {run_id} recorded; request-review will verify it passed", file=sys.stderr)
+    except Exception as e:
+        print(f"CI: could not record run: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
