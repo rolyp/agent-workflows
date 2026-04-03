@@ -188,10 +188,6 @@ class PaperAuthoring(Workflow):
             extra["regions"] = [[f, p] for f, p in regions]
         super()._push_state(phase, task, **extra)
 
-    def _pop_state(self, validate: bool = True) -> dict[str, object]:
-        """Pop top frame; callers pass validate=False when they'll validate later."""
-        return super()._pop_state(validate=validate)
-
     def _save_stack(self, stack: list[dict], validate: bool = True) -> None:
         """Write stack, update dashboard, optionally validate."""
         super()._save_stack(stack, validate=validate)
