@@ -165,89 +165,132 @@ class Workflow(ABC):
             raise RuntimeError(f"gh issue create failed: {result.stderr}")
         issue_url = result.stdout.strip()
 
-        # Add to project (uses separate token if configured)
-        project_org = self._get_env("GH_PROJECT_ORG")
-        project_number = self._get_env("GH_PROJECT_NUMBER")
-        project_env = self._gh_env("GH_PROJECT_TOKEN")
-        self._add_issue_to_project(issue_url, project_org, project_number, project_env)
+        # Add to project and set status to Planned
+        project_env = self._ensure_project_info()
+        item_id = self._add_issue_to_project(
+            issue_url, self._get_env("GH_PROJECT_ORG"),
+            self._get_env("GH_PROJECT_NUMBER"), project_env)
+        self._set_item_status(item_id, "Planned", project_env)
 
         return issue_url
 
-    def _add_issue_to_project(self, issue_url: str, org: str,
-                              project_number: str, env: dict) -> None:
-        """Add issue to project and set status to Planned.
-
-        Uses GraphQL directly — gh project item-add has permissions issues
-        when adding cross-owner issues (tries to read back field values).
-        """
-        # Extract owner/repo#number from URL to get the issue's node ID
+    def _parse_issue_url(self, issue_url: str) -> tuple[str, str, str]:
+        """Extract (owner, repo, number) from a GitHub issue URL."""
         match = re.search(r"github\.com/([^/]+)/([^/]+)/issues/(\d+)", issue_url)
         if not match:
             raise ValueError(f"Cannot parse issue URL: {issue_url}")
-        owner, repo_name, issue_number = match.group(1), match.group(2), match.group(3)
+        return match.group(1), match.group(2), match.group(3)
 
-        # Get issue node ID and project info in one query
-        query = (
-            f"query {{ "
-            f'repository(owner: "{owner}", name: "{repo_name}") {{ '
-            f"issue(number: {issue_number}) {{ id }} }} "
-            f'organization(login: "{org}") {{ '
-            f"projectV2(number: {project_number}) {{ id "
-            f'field(name: "Status") {{ '
-            f"... on ProjectV2SingleSelectField {{ id options {{ id name }} }} "
-            f"}} }} }} }}"
-        )
+    def _gql(self, query: str, env: dict) -> dict:
+        """Run a GraphQL query/mutation and return the data dict."""
         result = subprocess.run(
             ["gh", "api", "graphql", "-f", f"query={query}"],
             capture_output=True, text=True, env=env,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to query issue/project: {result.stderr}")
+            raise RuntimeError(f"GraphQL failed: {result.stderr}")
+        return json.loads(result.stdout)["data"]
 
-        data = json.loads(result.stdout)["data"]
-        issue_id = data["repository"]["issue"]["id"]
+    def _get_project_status_field(self, org: str, project_number: str,
+                                  env: dict) -> tuple[str, str, list[dict]]:
+        """Return (project_id, field_id, options) for the Status field."""
+        data = self._gql(
+            f'query {{ organization(login: "{org}") {{ '
+            f"projectV2(number: {project_number}) {{ id "
+            f'field(name: "Status") {{ '
+            f"... on ProjectV2SingleSelectField {{ id options {{ id name }} }} "
+            f"}} }} }} }}",
+            env,
+        )
         project = data["organization"]["projectV2"]
-        project_id = project["id"]
-        status_field = project["field"]
-        field_id = status_field["id"]
+        field = project["field"]
+        return project["id"], field["id"], field["options"]
 
-        planned_id = None
-        for opt in status_field["options"]:
-            if opt["name"] == "Planned":
-                planned_id = opt["id"]
-                break
-        if not planned_id:
-            raise RuntimeError("No 'Planned' status option found in project")
+    def _find_status_option(self, options: list[dict], name: str) -> str:
+        """Find a status option by name; raise if not found."""
+        for opt in options:
+            if opt["name"] == name:
+                return opt["id"]
+        available = [o["name"] for o in options]
+        raise RuntimeError(f"No '{name}' status option found (available: {available})")
+
+    def _add_issue_to_project(self, issue_url: str, org: str,
+                              project_number: str, env: dict) -> str:
+        """Add issue to project; return the project item ID.
+
+        Uses GraphQL directly — gh CLI has permissions issues
+        with cross-owner issues (tries to read back field values).
+        """
+        owner, repo_name, issue_number = self._parse_issue_url(issue_url)
+
+        # Get issue node ID
+        data = self._gql(
+            f'query {{ repository(owner: "{owner}", name: "{repo_name}") {{ '
+            f"issue(number: {issue_number}) {{ id }} }} }}",
+            env,
+        )
+        issue_id = data["repository"]["issue"]["id"]
 
         # Add to project
-        mutation = (
+        data = self._gql(
             f'mutation {{ addProjectV2ItemById(input: {{ '
-            f'projectId: "{project_id}", contentId: "{issue_id}" }}) '
-            f"{{ item {{ id }} }} }}"
+            f'projectId: "{self._project_id}", contentId: "{issue_id}" }}) '
+            f"{{ item {{ id }} }} }}",
+            env,
         )
-        result = subprocess.run(
-            ["gh", "api", "graphql", "-f", f"query={mutation}"],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to add issue to project: {result.stderr}")
+        return data["addProjectV2ItemById"]["item"]["id"]
 
-        item_id = json.loads(result.stdout)["data"]["addProjectV2ItemById"]["item"]["id"]
-
-        # Set status to Planned
-        set_status = (
+    def _set_item_status(self, item_id: str, status_name: str,
+                         env: dict) -> None:
+        """Set a project item's status field."""
+        option_id = self._find_status_option(self._status_options, status_name)
+        self._gql(
             f'mutation {{ updateProjectV2ItemFieldValue(input: {{ '
-            f'projectId: "{project_id}", itemId: "{item_id}", '
-            f'fieldId: "{field_id}", '
-            f'value: {{ singleSelectOptionId: "{planned_id}" }} }}) '
-            f"{{ projectV2Item {{ id }} }} }}"
+            f'projectId: "{self._project_id}", itemId: "{item_id}", '
+            f'fieldId: "{self._status_field_id}", '
+            f'value: {{ singleSelectOptionId: "{option_id}" }} }}) '
+            f"{{ projectV2Item {{ id }} }} }}",
+            env,
         )
-        result = subprocess.run(
-            ["gh", "api", "graphql", "-f", f"query={set_status}"],
-            capture_output=True, text=True, env=env,
+
+    def _ensure_project_info(self) -> dict:
+        """Load and cache project info (project_id, field_id, options)."""
+        if not hasattr(self, "_project_id"):
+            org = self._get_env("GH_PROJECT_ORG")
+            number = self._get_env("GH_PROJECT_NUMBER")
+            env = self._gh_env("GH_PROJECT_TOKEN")
+            self._project_id, self._status_field_id, self._status_options = \
+                self._get_project_status_field(org, number, env)
+        return self._gh_env("GH_PROJECT_TOKEN")
+
+    def _find_project_item(self, issue_url: str, env: dict) -> str:
+        """Find the project item ID for an issue. Searches recent project items."""
+        owner, repo_name, issue_number = self._parse_issue_url(issue_url)
+        target_repo = f"{owner}/{repo_name}"
+        org = self._get_env("GH_PROJECT_ORG")
+        number = self._get_env("GH_PROJECT_NUMBER")
+
+        data = self._gql(
+            f'query {{ organization(login: "{org}") {{ '
+            f"projectV2(number: {number}) {{ "
+            f"items(last: 50) {{ nodes {{ id content {{ "
+            f"... on Issue {{ number repository {{ nameWithOwner }} }} "
+            f"}} }} }} }} }} }}",
+            env,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to set project status: {result.stderr}")
+        for item in data["organization"]["projectV2"]["items"]["nodes"]:
+            content = item.get("content", {})
+            if (content and
+                content.get("repository", {}).get("nameWithOwner") == target_repo and
+                content.get("number") == int(issue_number)):
+                return item["id"]
+        raise RuntimeError(f"Issue {issue_url} not found in project")
+
+    def set_issue_status(self, issue_url: str, status: str) -> None:
+        """Set the project status of an issue (e.g. 'In Progress', 'Done')."""
+        env = self._ensure_project_info()
+        item_id = self._find_project_item(issue_url, env)
+        self._set_item_status(item_id, status, env)
 
     # --- Abstract interface ---
 
