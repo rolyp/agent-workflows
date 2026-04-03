@@ -7,8 +7,8 @@
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
 
-# Only modify user-initiated commits (not merges, squashes, etc.)
-if [ -n "$COMMIT_SOURCE" ]; then
+# Only modify user-initiated commits (not merges, squashes, amends)
+if [ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ] || [ "$COMMIT_SOURCE" = "commit" ]; then
     exit 0
 fi
 
