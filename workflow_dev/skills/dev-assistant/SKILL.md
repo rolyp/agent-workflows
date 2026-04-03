@@ -14,6 +14,14 @@ Drives workflow development within the agent-workflows submodule. Owns implement
 
 Follow the [workflow phases](../../workflow.md#phases) and [state machine](../../workflow.md#state-machine). At each phase transition, run the corresponding `workflow.py` command. The hooks enforce the discipline; do not attempt to bypass them.
 
+## CI protocol
+
+After every `git push`, spawn a background agent to watch CI:
+```
+gh run watch --exit-status --repo rolyp/agent-workflows
+```
+The post-push hook will remind you. If CI fails, investigate before continuing.
+
 ## Working with other skills
 
 - **Tester**: invoke for writing new tests or diagnosing test failures. For quick test runs, invoke inline
