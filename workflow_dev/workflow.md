@@ -49,6 +49,7 @@ Enforced by `WorkflowDev` (`workflow.py`) via hooks. State stored in `state.json
 idle ──start-task──► refactoring (locked)
                          │
               expand-coverage / refactor-code (toggle)
+              begin-step / end-step (structured iterations)
                          │
                     request-review (tests must pass)
                          │
@@ -58,7 +59,12 @@ idle ──start-task──► refactoring (locked)
                   approve    feedback ──► refactoring
                       │
                       ▼
-                 modifying
+                 refactoring
+                      │
+                 begin-modify <description>
+                      │
+                      ▼
+                 modifying (scoped)
                   │      │
   back-to-refactor  request-review (tests must pass)
           │              │
@@ -86,9 +92,12 @@ idle ──start-task──► refactoring (locked)
 | `start-task <name>` | idle | refactoring | — |
 | `expand-coverage` | refactoring | refactoring (expand-coverage) | — |
 | `refactor-code` | refactoring | refactoring (refactor-code) | — |
-| `request-review` | refactoring or modifying | review | Tests must pass |
-| `approve` | review | modifying (if reviewing refactoring) or idle (if reviewing modifying) | — |
+| `begin-step <name>` | refactoring | refactoring (nested frame) | No step already in progress |
+| `end-step` | refactoring (nested) | refactoring (pop frame) | Tests must pass |
+| `request-review` | refactoring or modifying | review | Tests must pass; no step in progress |
+| `approve` | review | refactoring (if reviewing refactoring) or idle (if reviewing modifying) | — |
 | `feedback` | review | refactoring (locked) | — |
+| `begin-modify <desc>` | refactoring | modifying (scoped) | — |
 | `back-to-refactor` | modifying | refactoring (locked) | — |
 
 ---
@@ -113,9 +122,10 @@ idle ──start-task──► refactoring (locked)
 - Fix the code and remove the decorator — test now passes normally
 
 ### Modifying
+- Enter via `begin-modify <description>` with explicit scope
 - Make behaviour-changing edits (code + tests together)
 - May cycle back via `back-to-refactor` for further preparation
-- Multiple refactor→modify cycles allowed per task (each refactoring phase ends with review)
+- Multiple refactor→modify cycles allowed per task
 - When complete: `request-review` (runs tests, then **Code Reviewer** must approve before task closes)
 
 ### Review
