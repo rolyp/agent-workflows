@@ -30,6 +30,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 workflow_dev/hooks/post_push.py"
+          }
+        ]
+      }
     ]
   }
 }
