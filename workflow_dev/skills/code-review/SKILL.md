@@ -11,17 +11,17 @@ Reviews code changes for quality. Triggered automatically at the `request-review
 
 ## What to look for
 
-1. **Consolidation opportunities** — duplicated logic, similar patterns that could share an abstraction
+1. **Consolidation** — duplicated logic, similar patterns that could share an abstraction
 2. **Code smells** — overly long methods, unclear naming, deep nesting, god objects
-3. **Fragile implementations** — hardcoded values, brittle string parsing, implicit coupling between components
-4. **Unnecessary complexity** — abstractions that serve only one call site, speculative generality
-5. **Consistency** — does the new code follow conventions established elsewhere in the codebase?
-6. **Naming consistency** — are names systematic and predictable? Do similar things have similar names? Do enum values, state names, label names, and error messages all agree?
-7. **Unstable constants** — string literals or constants that duplicate information derivable from code structure (class names, enum values, field names). Prefer deriving over hardcoding
-8. **Pushdown semantics** — every `begin-*` must have a matching `end-*`. Pushed frames must carry the right fields. Pop must restore the prior state completely (label, mode, etc.)
-9. **Fail-fast** — no silent error swallowing (`except: return`, `if not x: return`). Errors should propagate. Missing configuration should raise, not silently skip
-10. **API atomicity** — operations that modify external state (labels, issue body, project status) should leave the system in a consistent state if interrupted. Add before remove; check before act
-11. **Override consistency** — subclass overrides should delegate to super where possible (`super()._write_state(...)`) rather than reimplementing. Override signatures must match the base (Liskov)
+3. **Fragile implementations** — hardcoded values, brittle string parsing, implicit coupling
+4. **Unnecessary complexity** — abstractions serving only one call site, speculative generality
+5. **Convention consistency** — does new code follow patterns established elsewhere in the codebase?
+6. **Naming consistency** — systematic, predictable names. Similar things named similarly. Names across layers (enums, strings, error messages, UI) agree
+7. **Unstable constants** — literals that duplicate information derivable from code structure. Prefer deriving over hardcoding
+8. **Fail-fast** — no silent error swallowing (`except: return`, `if not x: return`). Missing configuration should raise, not silently degrade
+9. **Atomicity** — operations modifying external state should leave the system consistent if interrupted. Add before remove; check before act
+10. **Inheritance discipline** — overrides delegate to super where possible rather than reimplementing. Override signatures match the base (Liskov)
+11. **Protocol tightening** — can preconditions be strengthened, optional parameters made required, implicit conventions made explicit? Loose protocols accumulate bugs
 
 ## What NOT to flag
 
