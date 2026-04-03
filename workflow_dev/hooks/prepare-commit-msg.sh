@@ -48,5 +48,5 @@ if head -1 "$COMMIT_MSG_FILE" | grep -q '^\['; then
     exit 0
 fi
 
-# Prepend tag
-sed -i '' "1s/^/$TAG /" "$COMMIT_MSG_FILE"
+# Prepend tag (use | delimiter to avoid conflict with / in tag)
+sed -i '' "1s|^|$TAG |" "$COMMIT_MSG_FILE"
