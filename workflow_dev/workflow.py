@@ -243,7 +243,11 @@ class WorkflowDev(Workflow):
         self._pop_state()
         issue_url = self._issue_url_from_state()
         if issue_url and step_name:
-            self.complete_issue_todo(issue_url, step_name)
+            head_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, cwd=self.root,
+            ).stdout.strip()
+            self.complete_issue_todo(issue_url, step_name, commit_sha=head_sha)
 
     def begin_subtask(self, title: str) -> str:
         """Create a sub-issue for a substantial subtask. Returns the sub-issue URL."""

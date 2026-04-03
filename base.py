@@ -415,13 +415,15 @@ class Workflow(ABC):
             body = body.replace(target, f"- [ ] {self.ACTIVE_MARKER} {item}", 1)
         self._write_issue_body(issue_url, body)
 
-    def complete_issue_todo(self, issue_url: str, item: str) -> None:
-        """Check off a todo item, removing active marker if present."""
+    def complete_issue_todo(self, issue_url: str, item: str,
+                            commit_sha: str) -> None:
+        """Check off a todo item, linking to the commit that completed it."""
         body = self._read_issue_body(issue_url)
+        repo = self.get_repo()
         # Match with or without active marker
         active_unchecked = f"- [ ] {self.ACTIVE_MARKER} {item}"
         plain_unchecked = f"- [ ] {item}"
-        checked = f"- [x] {item}"
+        checked = f"- [x] {item} ([{commit_sha[:7]}](https://github.com/{repo}/commit/{commit_sha}))"
         if active_unchecked in body:
             body = body.replace(active_unchecked, checked, 1)
         elif plain_unchecked in body:
