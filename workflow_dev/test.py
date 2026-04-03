@@ -266,13 +266,12 @@ class CheckEditTest(TestFixture):
         allowed, msg = wd.check_edit("test.py")
         self.assertTrue(allowed)
 
-    def test_expand_coverage_blocks_code_edit(self):
+    def test_refactor_test_blocks_code_edit(self):
         wd = self._make_wd()
         wd.start_task("task-1")
-        wd.expand_coverage()
+        wd.begin_refactor("expand-coverage")
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
-        self.assertIn("refactor-code", msg)
 
     def test_refactor_code_allows_code_edit(self):
         wd = self._make_wd()

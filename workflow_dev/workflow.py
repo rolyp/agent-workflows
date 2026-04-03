@@ -38,15 +38,12 @@ class RefactoringMode(Enum):
 # CLI command names
 CMD_STARTUP = "startup"
 CMD_START_TASK = "start-task"
-CMD_EXPAND_COVERAGE = "expand-coverage"
-CMD_REFACTOR_CODE = "refactor-code"
 CMD_BEGIN_REFACTOR = "begin-refactor"
 CMD_END_REFACTOR = "end-refactor"
 CMD_BEGIN_STEP = "begin-step"
 CMD_END_STEP = "end-step"
 CMD_BEGIN_SUBTASK = "begin-subtask"
 CMD_END_SUBTASK = "end-subtask"
-CMD_IDLE = "idle"
 CMD_BEGIN_MODIFY = "begin-modify"
 CMD_BACK_TO_REFACTOR = "back-to-refactor"
 CMD_REQUEST_REVIEW = "request-review"
@@ -169,24 +166,6 @@ class WorkflowDev(Workflow):
         self._write_state(Phase.REFACTORING, task, issue_url=issue_url)
         self._set_label(self.LABEL_IDLE)
 
-    def expand_coverage(self) -> None:
-        """Switch to expand-coverage mode: only test files editable."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"expand-coverage only available during refactoring (current: {phase.value})")
-        state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.EXPAND_COVERAGE.value)
-        self._set_label(self.LABEL_REFACTOR_TEST)
-
-    def refactor_code(self) -> None:
-        """Switch to refactor-code mode: only code files editable."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"refactor-code only available during refactoring (current: {phase.value})")
-        state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.REFACTOR_CODE.value)
-        self._set_label(self.LABEL_REFACTOR_CODE)
-
     def _issue_url_from_state(self) -> str | None:
         """Get issue URL from the bottom of the state stack (root task)."""
         stack = self._read_stack()
@@ -299,15 +278,6 @@ class WorkflowDev(Workflow):
                 ["gh", "issue", "close", number, "--repo", self.get_repo()],
                 capture_output=True, text=True, env=env,
             )
-
-    def idle(self) -> None:
-        """Return to idle (clear refactoring mode). Available during refactoring."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"idle only available during refactoring (current: {phase.value})")
-        state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"))
-        self._set_label(self.LABEL_IDLE)
 
     def begin_modify(self, description: str) -> None:
         """Enter modifying phase with explicit scope. Only available from idle (depth 1, no mode)."""
@@ -448,18 +418,18 @@ class WorkflowDev(Workflow):
             if mode is None:
                 return False, (
                     "Refactoring phase entered but no mode selected. "
-                    f"Use `workflow.py {CMD_EXPAND_COVERAGE}` or `workflow.py {CMD_REFACTOR_CODE}` first."
+                    f"Use `workflow.py {CMD_BEGIN_REFACTOR} <code|test>` first."
                 )
             is_test = _is_test_file(rel_path)
             if mode == RefactoringMode.EXPAND_COVERAGE.value and not is_test:
                 return False, (
                     f"In expand-coverage mode: only test files are editable. "
-                    f"Use `workflow.py {CMD_REFACTOR_CODE}` to switch to code editing."
+                    f"Run `end-refactor` then `{CMD_BEGIN_REFACTOR} code` to switch."
                 )
             if mode == RefactoringMode.REFACTOR_CODE.value and is_test:
                 return False, (
                     f"In refactor-code mode: only code files are editable. "
-                    f"Use `workflow.py {CMD_EXPAND_COVERAGE}` to switch to test editing."
+                    f"Run `end-refactor` then `{CMD_BEGIN_REFACTOR} test` to switch."
                 )
 
         # Phase.MODIFYING: all edits allowed
@@ -489,7 +459,7 @@ class WorkflowDev(Workflow):
             if mode is None:
                 return False, (
                     "Refactoring phase entered but no mode selected. "
-                    f"Use `workflow.py {CMD_EXPAND_COVERAGE}` or `workflow.py {CMD_REFACTOR_CODE}` first."
+                    f"Use `workflow.py {CMD_BEGIN_REFACTOR} <code|test>` first."
                 )
             is_test = _is_test_file(rel_path)
             if mode == RefactoringMode.EXPAND_COVERAGE.value and not is_test:
@@ -599,12 +569,6 @@ def main() -> None:
         if issue_number:
             msg += f" · issue #{issue_number} → In Progress"
         print(msg)
-    elif command == CMD_EXPAND_COVERAGE:
-        wd.expand_coverage()
-        print("Mode: expand-coverage (test files only)")
-    elif command == CMD_REFACTOR_CODE:
-        wd.refactor_code()
-        print("Mode: refactor-code (code files only)")
     elif command == CMD_BEGIN_REFACTOR:
         if len(sys.argv) < 3 or sys.argv[2] not in ("code", "test"):
             print(f"Usage: workflow.py {CMD_BEGIN_REFACTOR} <code|test>", file=sys.stderr)
@@ -633,9 +597,6 @@ def main() -> None:
     elif command == CMD_END_SUBTASK:
         wd.end_subtask()
         print("Subtask complete; sub-issue closed")
-    elif command == CMD_IDLE:
-        wd.idle()
-        print("Returned to idle")
     elif command == CMD_BEGIN_MODIFY:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_BEGIN_MODIFY} <description>", file=sys.stderr)
