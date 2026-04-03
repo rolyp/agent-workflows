@@ -67,6 +67,18 @@ class WorkflowDev(Workflow):
     def _phase_enum(self) -> type[Phase]:
         return Phase
 
+    # Fields carried forward from previous frame unless overridden
+    _CARRY_FORWARD = ("issue_url",)
+
+    def _write_state(self, phase: Enum, task: str | None = None,
+                     **extra: object) -> None:
+        """Replace top frame, carrying forward issue_url."""
+        prev = self.read_state()
+        for key in self._CARRY_FORWARD:
+            if key not in extra and key in prev:
+                extra[key] = prev[key]
+        super()._write_state(phase, task, **extra)
+
     # --- Dashboard ---
 
     def _render_state(self) -> str:
