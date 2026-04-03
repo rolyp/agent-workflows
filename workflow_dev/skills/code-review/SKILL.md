@@ -16,6 +16,8 @@ Reviews code changes for quality. Triggered automatically at the `request-review
 3. **Fragile implementations** — hardcoded values, brittle string parsing, implicit coupling between components
 4. **Unnecessary complexity** — abstractions that serve only one call site, speculative generality
 5. **Consistency** — does the new code follow conventions established elsewhere in the codebase?
+6. **Naming consistency** — are names systematic and predictable? Do similar things have similar names? Are naming patterns followed across the codebase?
+7. **Unstable constants** — are there string literals or constants that duplicate information derivable from the code structure (e.g. class names, enum values, field names)? Prefer deriving over hardcoding
 
 ## What NOT to flag
 
