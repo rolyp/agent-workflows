@@ -64,8 +64,8 @@ class Workflow(ABC):
     def _save_stack(self, stack: list[dict], validate: bool = True) -> None:
         """Write the stack to disk. Subclasses may override to add side effects.
 
-        validate is a hint for subclasses (e.g. PaperAuthoring skips
-        validation when the caller will validate after further changes).
+        validate: no-op in base; subclasses (e.g. PaperAuthoring) use it to
+        skip validation when the caller will validate after further changes.
         """
         self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
 
