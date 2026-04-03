@@ -140,6 +140,7 @@ class WorkflowDev(Workflow):
             issue_url = f"https://github.com/{repo}/issues/{issue_number}"
             self.set_issue_status(issue_url, "In Progress")
         self._write_state(Phase.REFACTORING, task, issue_url=issue_url)
+        self._set_label("idle")
 
     def expand_coverage(self) -> None:
         """Switch to expand-coverage mode: only test files editable."""
@@ -148,6 +149,7 @@ class WorkflowDev(Workflow):
             raise ValueError(f"expand-coverage only available during refactoring (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.EXPAND_COVERAGE.value)
+        self._set_label("refactor/test")
 
     def refactor_code(self) -> None:
         """Switch to refactor-code mode: only code files editable."""
@@ -156,11 +158,24 @@ class WorkflowDev(Workflow):
             raise ValueError(f"refactor-code only available during refactoring (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.REFACTOR_CODE.value)
+        self._set_label("refactor/code")
 
     def _issue_url_from_state(self) -> str | None:
         """Get issue URL from the bottom of the state stack (root task)."""
         stack = self._read_stack()
         return stack[0].get("issue_url")
+
+    def _set_label(self, label: str) -> None:
+        """Set workflow label on the active issue, if one is tracked."""
+        issue_url = self._issue_url_from_state()
+        if issue_url:
+            self.set_issue_label(issue_url, label)
+
+    def _clear_labels(self) -> None:
+        """Remove all workflow labels from the active issue."""
+        issue_url = self._issue_url_from_state()
+        if issue_url:
+            self.clear_issue_labels(issue_url)
 
     def begin_step(self, name: str) -> None:
         """Begin a named refactoring step. Pushes a frame; adds todo to issue."""
@@ -200,6 +215,7 @@ class WorkflowDev(Workflow):
             raise ValueError(f"begin-modify only available during refactoring (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.MODIFYING, state.get("task"), modify_description=description)
+        self._set_label("modify")
 
     def back_to_refactor(self) -> None:
         """Return from modifying to refactoring (locked)."""
@@ -208,6 +224,7 @@ class WorkflowDev(Workflow):
             raise ValueError(f"back-to-refactor only available during modifying (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"))
+        self._set_label("idle")
 
     def request_review(self) -> None:
         """Request code review from refactoring or modifying. Runs tests and checks CI first."""
@@ -222,6 +239,7 @@ class WorkflowDev(Workflow):
         self._check_ci()
         state = self.read_state()
         self._write_state(Phase.REVIEW, state.get("task"), review_of=phase.value)
+        self._set_label("review")
 
     def approve(self) -> None:
         """Approve review; return to refactoring or idle depending on review type."""
@@ -234,6 +252,7 @@ class WorkflowDev(Workflow):
             issue_url = self._issue_url_from_state()
             if issue_url:
                 self.set_issue_status(issue_url, "Done")
+                self.clear_issue_labels(issue_url)
                 env = self._gh_env()
                 number = self._get_issue_number(issue_url)
                 subprocess.run(
@@ -243,6 +262,7 @@ class WorkflowDev(Workflow):
             self._write_state(Phase.IDLE)
         else:
             self._write_state(Phase.REFACTORING, state.get("task"))
+            self._set_label("idle")
 
     def feedback(self, items: list[str] | None = None) -> None:
         """Review feedback; return to refactoring. Optionally add todo items for fixes."""
@@ -251,6 +271,7 @@ class WorkflowDev(Workflow):
             raise ValueError(f"feedback only available during review (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"))
+        self._set_label("idle")
         if items:
             issue_url = self._issue_url_from_state()
             if issue_url:
