@@ -318,11 +318,13 @@ class Workflow(ABC):
         number = self._get_issue_number(issue_url)
 
         # Add the new label first
-        subprocess.run(
+        result = subprocess.run(
             ["gh", "issue", "edit", number, "--repo", repo,
              "--add-label", label],
             capture_output=True, text=True, env=env,
         )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to add label '{label}': {result.stderr}")
 
         # Then remove any other workflow labels
         result = subprocess.run(
