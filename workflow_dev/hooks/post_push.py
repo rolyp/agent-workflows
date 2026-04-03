@@ -21,10 +21,8 @@ def main() -> None:
     if "git push" not in command:
         return
 
-    gh_token = os.environ.get("GH_TOKEN", "")
-    if not gh_token:
-        print("CI: GH_TOKEN not set, cannot track CI run", file=sys.stderr)
-        sys.exit(2)
+    wd = WorkflowDev(Path.cwd())
+    env = wd._gh_env()
 
     # Brief wait for run to register
     time.sleep(3)
@@ -33,8 +31,7 @@ def main() -> None:
         ["gh", "run", "list", "--limit", "1",
          "--json", "databaseId,status",
          "-q", ".[0].databaseId"],
-        capture_output=True, text=True,
-        env={**os.environ, "GH_TOKEN": gh_token},
+        capture_output=True, text=True, env=env,
     )
     if result.returncode != 0 or not result.stdout.strip():
         print(f"CI: could not determine run ID: {result.stderr}", file=sys.stderr)
@@ -43,15 +40,10 @@ def main() -> None:
     run_id = result.stdout.strip()
 
     # Record pending run in state
-    try:
-        wd = WorkflowDev(Path.cwd())
-        stack = wd._read_stack()
-        stack[-1]["pending_ci_run"] = run_id
-        wd._save_stack(stack)
-        print(f"CI: run {run_id} recorded; request-review will verify it passed", file=sys.stderr)
-    except Exception as e:
-        print(f"CI: could not record run: {e}", file=sys.stderr)
-        sys.exit(2)
+    stack = wd._read_stack()
+    stack[-1]["pending_ci_run"] = run_id
+    wd._save_stack(stack)
+    print(f"CI: run {run_id} recorded; request-review will verify it passed", file=sys.stderr)
 
 
 if __name__ == "__main__":

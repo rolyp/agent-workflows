@@ -92,6 +92,25 @@ class Workflow(ABC):
                 return None
         return file_path
 
+    # --- Environment ---
+
+    def _get_env(self, key: str) -> str:
+        """Get env var, falling back to .claude/settings.local.json."""
+        value = os.environ.get(key, "")
+        if value:
+            return value
+        settings_path = self.root / ".claude" / "settings.local.json"
+        if settings_path.exists():
+            settings = json.loads(settings_path.read_text())
+            value = settings.get("env", {}).get(key, "")
+        if not value:
+            raise RuntimeError(f"{key} not set (checked env and .claude/settings.local.json)")
+        return value
+
+    def _gh_env(self, token_key: str = "GH_TOKEN") -> dict:
+        """Build env dict for subprocess calls with the given token."""
+        return {**os.environ, "GH_TOKEN": self._get_env(token_key)}
+
     # --- GitHub integration ---
 
     def get_repo(self) -> str:
@@ -113,14 +132,10 @@ class Workflow(ABC):
 
         Raises if there isn't exactly one.
         """
-        gh_token = os.environ.get("GH_TOKEN", "")
-        if not gh_token:
-            raise RuntimeError("GH_TOKEN not set")
         repo = self.get_repo()
         result = subprocess.run(
             ["gh", "api", f"repos/{repo}/milestones", "--jq", ".[].title"],
-            capture_output=True, text=True,
-            env={**os.environ, "GH_TOKEN": gh_token},
+            capture_output=True, text=True, env=self._gh_env(),
         )
         if result.returncode != 0:
             raise RuntimeError(f"Failed to list milestones: {result.stderr}")
@@ -134,15 +149,12 @@ class Workflow(ABC):
     def create_issue(self, title: str, body: str) -> str:
         """Create a GitHub issue, assign to active milestone and project with status Planned.
 
-        Uses GH_TOKEN, GH_PROJECT_ORG, GH_PROJECT_NUMBER from environment.
+        Uses GH_TOKEN for repo operations, GH_PROJECT_TOKEN for project operations.
+        Falls back to .claude/settings.local.json if env vars not set.
         """
-        gh_token = os.environ.get("GH_TOKEN", "")
-        if not gh_token:
-            raise RuntimeError("GH_TOKEN not set")
-
         repo = self.get_repo()
         milestone = self.get_active_milestone()
-        env = {**os.environ, "GH_TOKEN": gh_token}
+        env = self._gh_env()
 
         # Create the issue
         cmd = ["gh", "issue", "create", "--repo", repo,
@@ -153,58 +165,52 @@ class Workflow(ABC):
             raise RuntimeError(f"gh issue create failed: {result.stderr}")
         issue_url = result.stdout.strip()
 
-        # Add to project if configured
-        project_org = os.environ.get("GH_PROJECT_ORG", "")
-        project_number = os.environ.get("GH_PROJECT_NUMBER", "")
-        if project_org and project_number:
-            self._add_issue_to_project(issue_url, project_org, project_number, env)
+        # Add to project (uses separate token if configured)
+        project_org = self._get_env("GH_PROJECT_ORG")
+        project_number = self._get_env("GH_PROJECT_NUMBER")
+        project_env = self._gh_env("GH_PROJECT_TOKEN")
+        self._add_issue_to_project(issue_url, project_org, project_number, project_env)
 
         return issue_url
 
     def _add_issue_to_project(self, issue_url: str, org: str,
                               project_number: str, env: dict) -> None:
-        """Add issue to project and set status to Planned."""
-        # Add item
+        """Add issue to project and set status to Planned.
+
+        Uses GraphQL directly — gh project item-add has permissions issues
+        when adding cross-owner issues (tries to read back field values).
+        """
+        # Extract owner/repo#number from URL to get the issue's node ID
+        match = re.search(r"github\.com/([^/]+)/([^/]+)/issues/(\d+)", issue_url)
+        if not match:
+            raise ValueError(f"Cannot parse issue URL: {issue_url}")
+        owner, repo_name, issue_number = match.group(1), match.group(2), match.group(3)
+
+        # Get issue node ID and project info in one query
+        query = (
+            f"query {{ "
+            f'repository(owner: "{owner}", name: "{repo_name}") {{ '
+            f"issue(number: {issue_number}) {{ id }} }} "
+            f'organization(login: "{org}") {{ '
+            f"projectV2(number: {project_number}) {{ id "
+            f'field(name: "Status") {{ '
+            f"... on ProjectV2SingleSelectField {{ id options {{ id name }} }} "
+            f"}} }} }} }}"
+        )
         result = subprocess.run(
-            ["gh", "project", "item-add", project_number,
-             "--owner", org, "--url", issue_url, "--format", "json"],
+            ["gh", "api", "graphql", "-f", f"query={query}"],
             capture_output=True, text=True, env=env,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"gh project item-add failed: {result.stderr}")
+            raise RuntimeError(f"Failed to query issue/project: {result.stderr}")
 
-        item_data = json.loads(result.stdout)
-        item_id = item_data.get("id")
-        if not item_id:
-            raise RuntimeError(f"No item ID returned from project item-add")
-
-        # Get project ID and Status field info
-        gql_result = subprocess.run(
-            ["gh", "api", "graphql", "-f", f"""query={{
-                organization(login: "{org}") {{
-                    projectV2(number: {project_number}) {{
-                        id
-                        field(name: "Status") {{
-                            ... on ProjectV2SingleSelectField {{
-                                id
-                                options {{ id name }}
-                            }}
-                        }}
-                    }}
-                }}
-            }}"""],
-            capture_output=True, text=True, env=env,
-        )
-        if gql_result.returncode != 0:
-            raise RuntimeError(f"Failed to query project fields: {gql_result.stderr}")
-
-        project_data = json.loads(gql_result.stdout)
-        project = project_data["data"]["organization"]["projectV2"]
+        data = json.loads(result.stdout)["data"]
+        issue_id = data["repository"]["issue"]["id"]
+        project = data["organization"]["projectV2"]
         project_id = project["id"]
         status_field = project["field"]
         field_id = status_field["id"]
 
-        # Find "Planned" option
         planned_id = None
         for opt in status_field["options"]:
             if opt["name"] == "Planned":
@@ -213,17 +219,35 @@ class Workflow(ABC):
         if not planned_id:
             raise RuntimeError("No 'Planned' status option found in project")
 
-        # Set status to Planned
+        # Add to project
+        mutation = (
+            f'mutation {{ addProjectV2ItemById(input: {{ '
+            f'projectId: "{project_id}", contentId: "{issue_id}" }}) '
+            f"{{ item {{ id }} }} }}"
+        )
         result = subprocess.run(
-            ["gh", "project", "item-edit",
-             "--id", item_id,
-             "--project-id", project_id,
-             "--field-id", field_id,
-             "--single-select-option-id", planned_id],
+            ["gh", "api", "graphql", "-f", f"query={mutation}"],
             capture_output=True, text=True, env=env,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"gh project item-edit failed: {result.stderr}")
+            raise RuntimeError(f"Failed to add issue to project: {result.stderr}")
+
+        item_id = json.loads(result.stdout)["data"]["addProjectV2ItemById"]["item"]["id"]
+
+        # Set status to Planned
+        set_status = (
+            f'mutation {{ updateProjectV2ItemFieldValue(input: {{ '
+            f'projectId: "{project_id}", itemId: "{item_id}", '
+            f'fieldId: "{field_id}", '
+            f'value: {{ singleSelectOptionId: "{planned_id}" }} }}) '
+            f"{{ projectV2Item {{ id }} }} }}"
+        )
+        result = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={set_status}"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to set project status: {result.stderr}")
 
     # --- Abstract interface ---
 

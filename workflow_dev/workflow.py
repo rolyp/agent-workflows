@@ -317,9 +317,7 @@ class WorkflowDev(Workflow):
         if not run_id:
             return
 
-        gh_token = os.environ.get("GH_TOKEN", "")
-        if not gh_token:
-            raise RuntimeError("GH_TOKEN not set; cannot verify CI status")
+        env = self._gh_env()
 
         # Poll until run completes
         while True:
@@ -327,8 +325,7 @@ class WorkflowDev(Workflow):
                 ["gh", "run", "view", str(run_id),
                  "--json", "status,conclusion",
                  "-q", ".status + \" \" + .conclusion"],
-                capture_output=True, text=True,
-                env={**os.environ, "GH_TOKEN": gh_token},
+                capture_output=True, text=True, env=env,
             )
             if result.returncode != 0:
                 raise RuntimeError(
