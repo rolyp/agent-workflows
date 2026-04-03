@@ -367,11 +367,12 @@ def main() -> None:
         sys.exit(1)
 
     if command == CMD_STARTUP:
+        milestone = wd.get_active_milestone()
         state = wd.read_state()
         phase = state["phase"]
         task = state.get("task")
         mode = state.get("mode")
-        summary = f"Workflow state: {phase}"
+        summary = f"Workflow state: {phase} · milestone: {milestone}"
         if task:
             summary += f" — {task}"
         if mode:
