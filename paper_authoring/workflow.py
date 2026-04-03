@@ -323,7 +323,7 @@ class PaperAuthoring(Workflow):
 
     def approve_triage(self) -> None:
         """Exit triage, enter idle. Creates GitHub Issues for all To Do tasks."""
-        self._create_github_issues()
+        self.create_github_issues()
         self._write_state(Phase.IDLE)
 
     # --- Task selection ---
@@ -800,7 +800,7 @@ class PaperAuthoring(Workflow):
         entry += task["suffix"]
         return entry
 
-    def _create_github_issues(self) -> None:
+    def create_github_issues(self) -> None:
         """Create GitHub Issues for all To Do tasks and store URLs in dashboard."""
         try:
             repo = self._get_repo()
