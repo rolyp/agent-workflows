@@ -293,15 +293,17 @@ class WorkflowDev(Workflow):
     # --- Helpers ---
 
     def _run_tests(self) -> None:
-        """Run pytest; raise if tests fail."""
+        """Run test.sh (mypy + pytest); raise if anything fails."""
+        test_script = self.root / "test.sh"
+        if not test_script.exists():
+            return
         result = subprocess.run(
-            ["python3", "-m", "pytest", "-q"],
+            ["bash", str(test_script)],
             capture_output=True, text=True, cwd=self.root,
         )
-        # Exit code 5 = no tests collected (acceptable)
-        if result.returncode not in (0, 5):
+        if result.returncode != 0:
             raise RuntimeError(
-                f"Tests must pass before transitioning to modifying.\n"
+                f"Build check failed.\n"
                 f"{result.stdout}{result.stderr}"
             )
 
