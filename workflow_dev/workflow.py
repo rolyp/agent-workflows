@@ -82,6 +82,27 @@ class WorkflowDev(Workflow):
                 extra[key] = prev[key]
         super()._write_state(phase, task, **extra)
 
+    def _label_for_state(self, state: dict) -> str:
+        """Derive the appropriate label from a state frame."""
+        phase = state.get("phase")
+        mode = state.get("mode")
+        if phase == Phase.MODIFYING.value:
+            return self.LABEL_MODIFY
+        if phase == Phase.REVIEW.value:
+            return self.LABEL_REVIEW
+        if phase == Phase.REFACTORING.value and mode:
+            if mode == RefactoringMode.EXPAND_COVERAGE.value:
+                return self.LABEL_REFACTOR_TEST
+            if mode == RefactoringMode.REFACTOR_CODE.value:
+                return self.LABEL_REFACTOR_CODE
+        return self.LABEL_IDLE
+
+    def _pop_state(self, validate: bool = True) -> dict:
+        """Pop state frame and restore the label for the frame below."""
+        result = super()._pop_state(validate=validate)
+        self._set_label(self._label_for_state(self.read_state()))
+        return result
+
     # --- Dashboard ---
 
     def _render_state(self) -> str:
