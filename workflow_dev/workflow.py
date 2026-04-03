@@ -40,6 +40,8 @@ CMD_STARTUP = "startup"
 CMD_START_TASK = "start-task"
 CMD_EXPAND_COVERAGE = "expand-coverage"
 CMD_REFACTOR_CODE = "refactor-code"
+CMD_BEGIN_REFACTOR = "begin-refactor"
+CMD_END_REFACTOR = "end-refactor"
 CMD_BEGIN_STEP = "begin-step"
 CMD_END_STEP = "end-step"
 CMD_BEGIN_SUBTASK = "begin-subtask"
@@ -202,16 +204,47 @@ class WorkflowDev(Workflow):
         if issue_url:
             self.clear_issue_labels(issue_url)
 
+    def begin_refactor(self, mode: str) -> None:
+        """Push a refactoring frame (code or test). Only from idle."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"begin-refactor only available during refactoring (current: {phase.value})")
+        state = self.read_state()
+        if state.get("mode"):
+            raise ValueError(
+                f"Already in {state['mode']}. Run end-refactor first."
+            )
+        if mode not in (RefactoringMode.REFACTOR_CODE.value, RefactoringMode.EXPAND_COVERAGE.value):
+            raise ValueError(f"Unknown refactoring mode: {mode} (use 'code' or 'test')")
+        self._push_state(Phase.REFACTORING, state.get("task"), mode=mode)
+        label = (self.LABEL_REFACTOR_CODE if mode == RefactoringMode.REFACTOR_CODE.value
+                 else self.LABEL_REFACTOR_TEST)
+        self._set_label(label)
+
+    def end_refactor(self) -> None:
+        """Pop the refactoring frame. Runs tests first."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"end-refactor only available during refactoring (current: {phase.value})")
+        state = self.read_state()
+        if not state.get("mode"):
+            raise ValueError("Not in a refactoring mode. Nothing to end.")
+        stack = self._read_stack()
+        if len(stack) <= 1:
+            raise ValueError("Cannot pop root frame with end-refactor.")
+        self._run_tests()
+        self._pop_state()
+
     def begin_step(self, name: str) -> None:
         """Begin a named refactoring step. Pushes a frame; marks todo as active."""
         phase = self._read_phase()
         if phase is not Phase.REFACTORING:
             raise ValueError(f"begin-step only available during refactoring (current: {phase.value})")
-        stack = self._read_stack()
-        if len(stack) > 1:
-            current_step = stack[-1].get("step")
-            raise ValueError(f"Already in step '{current_step}'. Run `end-step` first.")
         state = self.read_state()
+        if not state.get("mode"):
+            raise ValueError("begin-step requires an active refactoring mode. Run begin-refactor first.")
+        if state.get("step"):
+            raise ValueError(f"Already in step '{state['step']}'. Run end-step first.")
         self._push_state(Phase.REFACTORING, state.get("task"), step=name,
                          mode=state.get("mode"))
         issue_url = self._issue_url_from_state()
@@ -277,17 +310,19 @@ class WorkflowDev(Workflow):
         self._set_label(self.LABEL_IDLE)
 
     def begin_modify(self, description: str) -> None:
-        """Enter modifying phase with explicit scope. Only available from idle."""
+        """Enter modifying phase with explicit scope. Only available from idle (depth 1, no mode)."""
         phase = self._read_phase()
         if phase is not Phase.REFACTORING:
             raise ValueError(f"begin-modify only available during refactoring (current: {phase.value})")
+        stack = self._read_stack()
+        if len(stack) > 1:
+            raise ValueError("Cannot begin modify with pushed frames. Pop back to idle first.")
         state = self.read_state()
         if state.get("mode"):
             raise ValueError(
                 f"Cannot begin modify while in {state['mode']}. "
-                f"Return to idle first."
+                f"Run end-refactor to return to idle first."
             )
-        state = self.read_state()
         self._write_state(Phase.MODIFYING, state.get("task"), modify_description=description)
         self._set_label(self.LABEL_MODIFY)
 
@@ -301,20 +336,19 @@ class WorkflowDev(Workflow):
         self._set_label(self.LABEL_IDLE)
 
     def request_review(self) -> None:
-        """Request code review. Only available from idle (refactoring with no mode)."""
+        """Request code review. Only available from idle (stack depth 1, no mode)."""
         phase = self._read_phase()
         state = self.read_state()
+        stack = self._read_stack()
+        if len(stack) > 1:
+            raise ValueError("Cannot request review with pushed frames. Pop back to idle first.")
         if phase is Phase.REFACTORING and state.get("mode"):
             raise ValueError(
                 f"Cannot request review while in {state['mode']}. "
-                f"Complete your current work and return to idle first."
+                f"Run end-refactor to return to idle first."
             )
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"request-review only available during refactoring or modifying (current: {phase.value})")
-        stack = self._read_stack()
-        if len(stack) > 1:
-            current_step = stack[-1].get("step")
-            raise ValueError(f"Step '{current_step}' still in progress. Run `end-step` first.")
         self._run_tests()
         self._check_ci()
         # Record the SHA at review time
@@ -571,6 +605,16 @@ def main() -> None:
     elif command == CMD_REFACTOR_CODE:
         wd.refactor_code()
         print("Mode: refactor-code (code files only)")
+    elif command == CMD_BEGIN_REFACTOR:
+        if len(sys.argv) < 3 or sys.argv[2] not in ("code", "test"):
+            print(f"Usage: workflow.py {CMD_BEGIN_REFACTOR} <code|test>", file=sys.stderr)
+            sys.exit(1)
+        mode = RefactoringMode.REFACTOR_CODE.value if sys.argv[2] == "code" else RefactoringMode.EXPAND_COVERAGE.value
+        wd.begin_refactor(mode)
+        print(f"Refactoring: {sys.argv[2]}")
+    elif command == CMD_END_REFACTOR:
+        wd.end_refactor()
+        print("Refactoring complete; back to idle")
     elif command == CMD_BEGIN_STEP:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_BEGIN_STEP} <step-name>", file=sys.stderr)
