@@ -495,6 +495,8 @@ class WorkflowDev(Workflow):
                 f"{result.stdout}{result.stderr}"
             )
 
+    CI_TIMEOUT = 30 * 60  # 30 minutes
+
     def _check_ci(self) -> None:
         """Check pending CI run if recorded by post-push hook. Blocks until complete."""
         state = self.read_state()
@@ -503,9 +505,10 @@ class WorkflowDev(Workflow):
             return
 
         env = self._gh_env()
+        deadline = time.time() + self.CI_TIMEOUT
 
-        # Poll until run completes
-        while True:
+        # Poll until run completes or timeout
+        while time.time() < deadline:
             result = subprocess.run(
                 ["gh", "run", "view", str(run_id),
                  "--json", "status,conclusion",
@@ -535,6 +538,11 @@ class WorkflowDev(Workflow):
                 return
 
             time.sleep(10)
+
+        raise RuntimeError(
+            f"CI run {run_id} timed out after {self.CI_TIMEOUT // 60} minutes. "
+            f"Check manually: gh run view {run_id}"
+        )
 
 
 # --- CLI entry point ---
