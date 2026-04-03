@@ -93,32 +93,41 @@ class StateTransitionTest(TestFixture):
         wd.expand_coverage()
         self.assertEqual(wd.read_state()["mode"], "expand-coverage")
 
-    def test_back_to_refactor(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.expand_coverage()
-        wd.request_review()
-        wd.approve()  # review of refactoring → modifying
-        wd.back_to_refactor()
-        state = wd.read_state()
-        self.assertEqual(state["phase"], "refactoring")
-        self.assertNotIn("mode", state)  # locked again
-
-    def test_review_of_refactoring_approves_to_modifying(self):
+    def test_review_of_refactoring_approves_to_refactoring(self):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.expand_coverage()
         wd.request_review()
         self.assertEqual(wd.read_state()["review_of"], "refactoring")
         wd.approve()
-        self.assertEqual(wd.read_state()["phase"], "modifying")
+        self.assertEqual(wd.read_state()["phase"], "refactoring")
+
+    def test_begin_modify_enters_modifying(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.begin_modify("add feature X")
+        state = wd.read_state()
+        self.assertEqual(state["phase"], "modifying")
+        self.assertEqual(state["modify_description"], "add feature X")
+
+    def test_begin_modify_only_from_refactoring(self):
+        wd = self._make_wd()
+        with self.assertRaises(ValueError):
+            wd.begin_modify("nope")  # not in refactoring
+
+    def test_back_to_refactor(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.begin_modify("feature X")
+        wd.back_to_refactor()
+        state = wd.read_state()
+        self.assertEqual(state["phase"], "refactoring")
+        self.assertNotIn("mode", state)  # locked again
 
     def test_review_of_modifying_approves_to_idle(self):
         wd = self._make_wd()
         wd.start_task("task-1")
-        wd.expand_coverage()
-        wd.request_review()
-        wd.approve()  # → modifying
+        wd.begin_modify("feature X")
         wd.request_review()
         self.assertEqual(wd.read_state()["review_of"], "modifying")
         wd.approve()
@@ -137,9 +146,7 @@ class StateTransitionTest(TestFixture):
     def test_feedback_on_modifying_review_returns_to_refactoring(self):
         wd = self._make_wd()
         wd.start_task("task-1")
-        wd.expand_coverage()
-        wd.request_review()
-        wd.approve()  # → modifying
+        wd.begin_modify("feature X")
         wd.request_review()
         wd.feedback()
         state = wd.read_state()
@@ -252,9 +259,7 @@ class CheckEditTest(TestFixture):
     def test_modifying_allows_all(self):
         wd = self._make_wd()
         wd.start_task("task-1")
-        wd.expand_coverage()
-        wd.request_review()
-        wd.approve()
+        wd.begin_modify("feature X")
         allowed_code, _ = wd.check_edit("workflow.py")
         allowed_test, _ = wd.check_edit("test.py")
         self.assertTrue(allowed_code)
@@ -263,9 +268,7 @@ class CheckEditTest(TestFixture):
     def test_review_blocks_all(self):
         wd = self._make_wd()
         wd.start_task("task-1")
-        wd.expand_coverage()
-        wd.request_review()
-        wd.approve()
+        wd.begin_modify("feature X")
         wd.request_review()
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
@@ -300,18 +303,14 @@ class CheckWriteTest(TestFixture):
     def test_modifying_allows_all(self):
         wd = self._make_wd()
         wd.start_task("task-1")
-        wd.expand_coverage()
-        wd.request_review()
-        wd.approve()
+        wd.begin_modify("feature X")
         allowed, msg = wd.check_write("new_module.py")
         self.assertTrue(allowed)
 
     def test_review_blocks_all(self):
         wd = self._make_wd()
         wd.start_task("task-1")
-        wd.expand_coverage()
-        wd.request_review()
-        wd.approve()
+        wd.begin_modify("feature X")
         wd.request_review()
         allowed, msg = wd.check_write("new_file.py")
         self.assertFalse(allowed)

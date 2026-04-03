@@ -40,6 +40,7 @@ CMD_EXPAND_COVERAGE = "expand-coverage"
 CMD_REFACTOR_CODE = "refactor-code"
 CMD_BEGIN_STEP = "begin-step"
 CMD_END_STEP = "end-step"
+CMD_BEGIN_MODIFY = "begin-modify"
 CMD_BACK_TO_REFACTOR = "back-to-refactor"
 CMD_REQUEST_REVIEW = "request-review"
 CMD_APPROVE = "approve"
@@ -74,6 +75,7 @@ class WorkflowDev(Workflow):
         mode = state.get("mode")
         step = state.get("step")
         review_of = state.get("review_of")
+        modify_desc = state.get("modify_description")
         if phase == Phase.IDLE.value:
             return "(idle)"
         parts = [f"**{phase}**"]
@@ -83,6 +85,8 @@ class WorkflowDev(Workflow):
             parts.append(f"mode: {mode}")
         if step:
             parts.append(f"step: {step}")
+        if modify_desc:
+            parts.append(f"scope: {modify_desc}")
         if review_of:
             parts.append(f"reviewing: {review_of}")
         return " · ".join(parts)
@@ -154,6 +158,14 @@ class WorkflowDev(Workflow):
         self._run_tests()
         self._pop_state()
 
+    def begin_modify(self, description: str) -> None:
+        """Enter modifying phase with explicit scope."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"begin-modify only available during refactoring (current: {phase.value})")
+        state = self.read_state()
+        self._write_state(Phase.MODIFYING, state.get("task"), modify_description=description)
+
     def back_to_refactor(self) -> None:
         """Return from modifying to refactoring (locked)."""
         phase = self._read_phase()
@@ -176,15 +188,15 @@ class WorkflowDev(Workflow):
         self._write_state(Phase.REVIEW, state.get("task"), review_of=phase.value)
 
     def approve(self) -> None:
-        """Approve review; transition depends on what was reviewed."""
+        """Approve review; return to refactoring or idle depending on review type."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"approve only available during review (current: {phase.value})")
         state = self.read_state()
-        if state.get("review_of") == Phase.REFACTORING.value:
-            self._write_state(Phase.MODIFYING, state.get("task"))
-        else:
+        if state.get("review_of") == Phase.MODIFYING.value:
             self._write_state(Phase.IDLE)
+        else:
+            self._write_state(Phase.REFACTORING, state.get("task"))
 
     def feedback(self) -> None:
         """Review feedback; always return to refactoring (fixes are refactoring by definition)."""
@@ -340,6 +352,12 @@ def main() -> None:
     elif command == CMD_END_STEP:
         wd.end_step()
         print("Step complete; tests passed")
+    elif command == CMD_BEGIN_MODIFY:
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_BEGIN_MODIFY} <description>", file=sys.stderr)
+            sys.exit(1)
+        wd.begin_modify(sys.argv[2])
+        print(f"Entering modifying: {sys.argv[2]}")
     elif command == CMD_BACK_TO_REFACTOR:
         wd.back_to_refactor()
         print("Back to refactoring (locked)")
