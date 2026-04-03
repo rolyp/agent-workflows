@@ -44,6 +44,7 @@ CMD_BEGIN_STEP = "begin-step"
 CMD_END_STEP = "end-step"
 CMD_BEGIN_SUBTASK = "begin-subtask"
 CMD_END_SUBTASK = "end-subtask"
+CMD_IDLE = "idle"
 CMD_BEGIN_MODIFY = "begin-modify"
 CMD_BACK_TO_REFACTOR = "back-to-refactor"
 CMD_REQUEST_REVIEW = "request-review"
@@ -266,11 +267,26 @@ class WorkflowDev(Workflow):
                 capture_output=True, text=True, env=env,
             )
 
+    def idle(self) -> None:
+        """Return to idle (clear refactoring mode). Available during refactoring."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"idle only available during refactoring (current: {phase.value})")
+        state = self.read_state()
+        self._write_state(Phase.REFACTORING, state.get("task"))
+        self._set_label(self.LABEL_IDLE)
+
     def begin_modify(self, description: str) -> None:
-        """Enter modifying phase with explicit scope."""
+        """Enter modifying phase with explicit scope. Only available from idle."""
         phase = self._read_phase()
         if phase is not Phase.REFACTORING:
             raise ValueError(f"begin-modify only available during refactoring (current: {phase.value})")
+        state = self.read_state()
+        if state.get("mode"):
+            raise ValueError(
+                f"Cannot begin modify while in {state['mode']}. "
+                f"Return to idle first."
+            )
         state = self.read_state()
         self._write_state(Phase.MODIFYING, state.get("task"), modify_description=description)
         self._set_label(self.LABEL_MODIFY)
@@ -285,8 +301,14 @@ class WorkflowDev(Workflow):
         self._set_label(self.LABEL_IDLE)
 
     def request_review(self) -> None:
-        """Request code review from refactoring or modifying. Runs tests and checks CI first."""
+        """Request code review. Only available from idle (refactoring with no mode)."""
         phase = self._read_phase()
+        state = self.read_state()
+        if phase is Phase.REFACTORING and state.get("mode"):
+            raise ValueError(
+                f"Cannot request review while in {state['mode']}. "
+                f"Complete your current work and return to idle first."
+            )
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"request-review only available during refactoring or modifying (current: {phase.value})")
         stack = self._read_stack()
@@ -567,6 +589,9 @@ def main() -> None:
     elif command == CMD_END_SUBTASK:
         wd.end_subtask()
         print("Subtask complete; sub-issue closed")
+    elif command == CMD_IDLE:
+        wd.idle()
+        print("Returned to idle")
     elif command == CMD_BEGIN_MODIFY:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_BEGIN_MODIFY} <description>", file=sys.stderr)
