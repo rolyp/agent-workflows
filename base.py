@@ -294,7 +294,16 @@ class Workflow(ABC):
 
     # --- Issue label management ---
 
-    WORKFLOW_LABELS = ("idle", "wip:refactor/test", "wip:refactor/code", "wip:modify", "wip:review")
+    LABEL_IDLE = "\u26aa idle"                     # ⚪ idle
+    LABEL_REFACTOR_TEST = "\U0001f7e2 refactor/test"  # 🟢 refactor/test
+    LABEL_REFACTOR_CODE = "\U0001f7e2 refactor/code"  # 🟢 refactor/code
+    LABEL_MODIFY = "\U0001f7e0 modify"                # 🟠 modify
+    LABEL_REVIEW = "\U0001f7e1 review"                # 🟡 review
+
+    WORKFLOW_LABELS = (
+        LABEL_IDLE, LABEL_REFACTOR_TEST, LABEL_REFACTOR_CODE,
+        LABEL_MODIFY, LABEL_REVIEW,
+    )
 
     def set_issue_label(self, issue_url: str, label: str) -> None:
         """Set exactly one workflow label on an issue, removing any others."""
