@@ -151,7 +151,7 @@ class WorkflowDev(Workflow):
             raise ValueError(f"expand-coverage only available during refactoring (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.EXPAND_COVERAGE.value)
-        self._set_label("refactor/test")
+        self._set_label("wip:refactor/test")
 
     def refactor_code(self) -> None:
         """Switch to refactor-code mode: only code files editable."""
@@ -160,7 +160,7 @@ class WorkflowDev(Workflow):
             raise ValueError(f"refactor-code only available during refactoring (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"), mode=RefactoringMode.REFACTOR_CODE.value)
-        self._set_label("refactor/code")
+        self._set_label("wip:refactor/code")
 
     def _issue_url_from_state(self) -> str | None:
         """Get issue URL from the bottom of the state stack (root task)."""
@@ -251,7 +251,7 @@ class WorkflowDev(Workflow):
             raise ValueError(f"begin-modify only available during refactoring (current: {phase.value})")
         state = self.read_state()
         self._write_state(Phase.MODIFYING, state.get("task"), modify_description=description)
-        self._set_label("modify")
+        self._set_label("wip:modify")
 
     def back_to_refactor(self) -> None:
         """Return from modifying to refactoring (locked)."""
@@ -275,7 +275,7 @@ class WorkflowDev(Workflow):
         self._check_ci()
         state = self.read_state()
         self._write_state(Phase.REVIEW, state.get("task"), review_of=phase.value)
-        self._set_label("review")
+        self._set_label("wip:review")
 
     def approve(self) -> None:
         """Approve review; return to refactoring or idle depending on review type."""
