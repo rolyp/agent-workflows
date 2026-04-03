@@ -24,6 +24,17 @@ Follows the refactor-first principle: tests are **behaviour-preservation witness
 - **Test both allowed and disallowed cases** for hook gates
 - **Tests enable refactoring.** When tests pass after a code change, that's evidence behaviour is preserved. When they fail, that's a signal the change wasn't purely structural
 
+## Bug regression pattern
+
+When capturing a known bug as a test:
+
+1. Write the test asserting **correct** (desired) behaviour
+2. Decorate with `@unittest.expectedFailure`
+3. Tests pass — the expected failure counts as OK
+4. In the modifying phase, fix the code and remove the decorator — the test now passes normally
+
+This keeps the test as a description of what *should* happen, not what currently (wrongly) does.
+
 ## Conventions
 
 - Tests live in `test.py` alongside the workflow module they test
