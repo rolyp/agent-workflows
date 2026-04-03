@@ -49,6 +49,7 @@ CMD_BACK_TO_REFACTOR = "back-to-refactor"
 CMD_REQUEST_REVIEW = "request-review"
 CMD_APPROVE = "approve"
 CMD_FEEDBACK = "feedback"
+CMD_COMPLETE_TASK = "complete-task"
 
 
 def _is_test_file(path: str) -> bool:
@@ -70,7 +71,7 @@ class WorkflowDev(Workflow):
         return Phase
 
     # Fields carried forward from previous frame unless overridden
-    _CARRY_FORWARD = ("issue_url",)
+    _CARRY_FORWARD = ("issue_url", "reviewed_sha")
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
@@ -273,32 +274,24 @@ class WorkflowDev(Workflow):
             raise ValueError(f"Step '{current_step}' still in progress. Run `end-step` first.")
         self._run_tests()
         self._check_ci()
+        # Record the SHA at review time
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=self.root,
+        ).stdout.strip()
         state = self.read_state()
-        self._write_state(Phase.REVIEW, state.get("task"), review_of=phase.value)
+        self._write_state(Phase.REVIEW, state.get("task"),
+                          review_of=phase.value, reviewed_sha=head_sha)
         self._set_label(self.LABEL_REVIEW)
 
     def approve(self) -> None:
-        """Approve review; return to refactoring or idle depending on review type."""
+        """Approve review; always return to refactoring."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"approve only available during review (current: {phase.value})")
         state = self.read_state()
-        if state.get("review_of") == Phase.MODIFYING.value:
-            # Task complete — set issue to Done and close
-            issue_url = self._issue_url_from_state()
-            if issue_url:
-                self.set_issue_status(issue_url, "Done")
-                self.clear_issue_labels(issue_url)
-                env = self._gh_env()
-                number = self._get_issue_number(issue_url)
-                subprocess.run(
-                    ["gh", "issue", "close", number, "--repo", self.get_repo()],
-                    capture_output=True, text=True, env=env,
-                )
-            self._write_state(Phase.IDLE)
-        else:
-            self._write_state(Phase.REFACTORING, state.get("task"))
-            self._set_label(self.LABEL_IDLE)
+        self._write_state(Phase.REFACTORING, state.get("task"))
+        self._set_label(self.LABEL_IDLE)
 
     def feedback(self, items: list[str] | None = None) -> None:
         """Review feedback; return to refactoring. Optionally add todo items for fixes."""
@@ -312,6 +305,43 @@ class WorkflowDev(Workflow):
             issue_url = self._issue_url_from_state()
             if issue_url:
                 self.add_issue_todos(issue_url, items)
+
+    def complete_task(self) -> None:
+        """Complete the current task. Requires review since last code change."""
+        phase = self._read_phase()
+        if phase is not Phase.REFACTORING:
+            raise ValueError(f"complete-task only available during refactoring (current: {phase.value})")
+        stack = self._read_stack()
+        if len(stack) > 1:
+            raise ValueError("Step or subtask still in progress. Complete it first.")
+
+        state = self.read_state()
+        reviewed_sha = state.get("reviewed_sha")
+        if not reviewed_sha:
+            raise ValueError("No review on record. Run request-review first.")
+
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=self.root,
+        ).stdout.strip()
+        if head_sha != reviewed_sha:
+            raise ValueError(
+                f"Code changed since last review (reviewed: {reviewed_sha[:8]}, "
+                f"HEAD: {head_sha[:8]}). Run request-review again."
+            )
+
+        # Close issue
+        issue_url = self._issue_url_from_state()
+        if issue_url:
+            self.set_issue_status(issue_url, "Done")
+            self.clear_issue_labels(issue_url)
+            env = self._gh_env()
+            number = self._get_issue_number(issue_url)
+            subprocess.run(
+                ["gh", "issue", "close", number, "--repo", self.get_repo()],
+                capture_output=True, text=True, env=env,
+            )
+        self._write_state(Phase.IDLE)
 
     # --- Hook gates ---
 
@@ -541,6 +571,9 @@ def main() -> None:
         if items:
             msg += f" · {len(items)} todo(s) added to issue"
         print(msg)
+    elif command == CMD_COMPLETE_TASK:
+        wd.complete_task()
+        print("Task complete; issue closed")
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         sys.exit(1)

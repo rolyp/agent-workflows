@@ -306,35 +306,38 @@ class Workflow(ABC):
     )
 
     def set_issue_label(self, issue_url: str, label: str) -> None:
-        """Set exactly one workflow label on an issue, removing any others."""
+        """Set exactly one workflow label on an issue, removing any others.
+
+        Adds the new label first, then removes old ones — ensures the issue
+        always has at least one workflow label (no gap between remove and add).
+        """
         if label not in self.WORKFLOW_LABELS:
             raise ValueError(f"Unknown workflow label: {label} (expected one of {self.WORKFLOW_LABELS})")
         repo = self.get_repo()
         env = self._gh_env()
         number = self._get_issue_number(issue_url)
 
-        # Remove existing workflow labels
+        # Add the new label first
+        subprocess.run(
+            ["gh", "issue", "edit", number, "--repo", repo,
+             "--add-label", label],
+            capture_output=True, text=True, env=env,
+        )
+
+        # Then remove any other workflow labels
         result = subprocess.run(
             ["gh", "issue", "view", number, "--repo", repo,
              "--json", "labels", "--jq", ".labels[].name"],
             capture_output=True, text=True, env=env,
         )
         if result.returncode == 0:
-            current = result.stdout.strip().split("\n")
-            for existing in current:
+            for existing in result.stdout.strip().split("\n"):
                 if existing in self.WORKFLOW_LABELS and existing != label:
                     subprocess.run(
                         ["gh", "issue", "edit", number, "--repo", repo,
                          "--remove-label", existing],
                         capture_output=True, text=True, env=env,
                     )
-
-        # Add the new label
-        subprocess.run(
-            ["gh", "issue", "edit", number, "--repo", repo,
-             "--add-label", label],
-            capture_output=True, text=True, env=env,
-        )
 
     def clear_issue_labels(self, issue_url: str) -> None:
         """Remove all workflow labels from an issue."""

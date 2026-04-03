@@ -26,6 +26,11 @@ class TestFixture(unittest.TestCase):
         test_sh = self.test_dir / "test.sh"
         test_sh.write_text("#!/bin/bash\nexit 0\n")
         test_sh.chmod(0o755)
+        # Init git repo so git rev-parse HEAD works (for reviewed_sha)
+        import subprocess
+        subprocess.run(["git", "init"], capture_output=True, cwd=self.test_dir)
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"],
+                       capture_output=True, cwd=self.test_dir)
         return WorkflowDev(self.test_dir)
 
 
@@ -128,14 +133,30 @@ class StateTransitionTest(TestFixture):
         self.assertEqual(state["phase"], "refactoring")
         self.assertNotIn("mode", state)  # locked again
 
-    def test_review_of_modifying_approves_to_idle(self):
+    def test_review_of_modifying_approves_to_refactoring(self):
         wd = self._make_wd()
         wd.start_task("task-1")
         wd.begin_modify("feature X")
         wd.request_review()
         self.assertEqual(wd.read_state()["review_of"], "modifying")
         wd.approve()
+        self.assertEqual(wd.read_state()["phase"], "refactoring")
+
+    def test_complete_task_after_review(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        wd.expand_coverage()
+        wd.request_review()
+        wd.approve()
+        wd.complete_task()
         self.assertEqual(wd.read_state()["phase"], "idle")
+
+    def test_complete_task_without_review_fails(self):
+        wd = self._make_wd()
+        wd.start_task("task-1")
+        with self.assertRaises(ValueError) as ctx:
+            wd.complete_task()
+        self.assertIn("No review on record", str(ctx.exception))
 
     def test_feedback_on_refactoring_review_returns_to_refactoring(self):
         wd = self._make_wd()
