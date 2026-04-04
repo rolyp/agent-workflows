@@ -46,6 +46,8 @@ CMD_ABORT_STEP = "abort-step"
 CMD_REQUEST_REVIEW = "request-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
+CMD_SUSPEND_PROTOCOL = "suspend-protocol"
+CMD_RESUME_PROTOCOL = "resume-protocol"
 
 
 def _is_test_file(path: str) -> bool:
@@ -203,6 +205,16 @@ class WorkflowDev(Workflow):
         phase = self._read_phase()
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"begin-step not available in {phase.value}. Use begin-task first.")
+        # Require clean working tree (excluding state.json and dashboard.md which are workflow-managed)
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", ".", ":!state.json", ":!dashboard.md"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if status.stdout.strip():
+            raise ValueError(
+                "Working tree is not clean. Commit or stash changes before begin-step.\n"
+                f"{status.stdout.strip()}"
+            )
         state = self.read_state()
         if state.get("end_step_failed"):
             raise ValueError(
@@ -233,8 +245,12 @@ class WorkflowDev(Workflow):
         self._set_label(label_map[step_mode])
         self._render_issue_todos()
 
-    def end_step(self) -> None:
-        """Pop the current step. Runs tests first. Records in history on success."""
+    def end_step(self, commit_message: str | None = None) -> None:
+        """Pop the current step. Runs tests, commits, records in history.
+
+        If commit_message is provided, stages all changes and commits.
+        If not provided, requires a clean working tree.
+        """
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
@@ -248,8 +264,19 @@ class WorkflowDev(Workflow):
             sf["stack"][-1]["end_step_failed"] = True
             self._save_stack(sf["stack"], history=sf["history"])
             raise
-        # Use last_commit from frame (set by post-commit hook), falling back to HEAD
-        commit_sha = state.get("last_commit") or subprocess.run(
+        # Commit if message provided
+        if commit_message:
+            subprocess.run(
+                ["git", "add", "-A"], capture_output=True, cwd=self.root,
+            )
+            result = subprocess.run(
+                ["git", "commit", "-m", commit_message],
+                capture_output=True, text=True, cwd=self.root,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Commit failed: {result.stderr}")
+        # Get the commit SHA (post-commit hook may have recorded it, or use HEAD)
+        commit_sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
@@ -391,6 +418,20 @@ class WorkflowDev(Workflow):
         if issue_url:
             self.close_issue(issue_url)
         self._write_state(Phase.IDLE)
+
+    # --- Protocol suspension ---
+
+    def suspend_protocol(self) -> None:
+        """Suspend protocol mode. Only for human use via ! prefix."""
+        sf = self._read_state_file()
+        sf["protocol_suspended"] = True
+        self._write_state_file(sf)
+
+    def resume_protocol(self) -> None:
+        """Resume protocol mode."""
+        sf = self._read_state_file()
+        sf.pop("protocol_suspended", None)
+        self._write_state_file(sf)
 
     # --- Hook gates ---
 
@@ -547,7 +588,8 @@ def main() -> None:
         wd.begin_step(sys.argv[2], sys.argv[3])
         print(f"Step: [{sys.argv[3]}] {sys.argv[2]}")
     elif command == CMD_END_STEP:
-        wd.end_step()
+        commit_msg = sys.argv[2] if len(sys.argv) > 2 else None
+        wd.end_step(commit_msg)
         print("Step complete; back to idle")
     elif command == CMD_ABORT_STEP:
         reason = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -569,6 +611,12 @@ def main() -> None:
     elif command == CMD_END_TASK:
         wd.end_task()
         print("Task complete; issue closed")
+    elif command == CMD_SUSPEND_PROTOCOL:
+        wd.suspend_protocol()
+        print("Protocol suspended. Resume with: workflow.py resume-protocol")
+    elif command == CMD_RESUME_PROTOCOL:
+        wd.resume_protocol()
+        print("Protocol resumed.")
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         sys.exit(1)

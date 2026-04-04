@@ -28,12 +28,16 @@ class TestFixture(unittest.TestCase):
         test_sh = self.test_dir / "test.sh"
         test_sh.write_text("#!/bin/bash\nexit 0\n")
         test_sh.chmod(0o755)
-        # Init git repo so git rev-parse HEAD works (for reviewed_sha)
+        # Init git repo
         import subprocess
         subprocess.run(["git", "init"], capture_output=True, cwd=self.test_dir)
-        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"],
+        # Create WorkflowDev (writes state.json)
+        wd = WorkflowDev(self.test_dir)
+        # Commit everything (test.sh + state.json) for clean-tree check
+        subprocess.run(["git", "add", "-A"], capture_output=True, cwd=self.test_dir)
+        subprocess.run(["git", "commit", "-m", "init"],
                        capture_output=True, cwd=self.test_dir)
-        return WorkflowDev(self.test_dir)
+        return wd
 
 
 class TestIsTestFile(unittest.TestCase):
