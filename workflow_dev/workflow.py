@@ -223,7 +223,7 @@ class WorkflowDev(Workflow):
         self._append_history({"step": step_name, "status": "completed", "commit": head_sha})
         self._render_issue_todos()
 
-    def abort_step(self) -> None:
+    def abort_step(self, reason: str = "") -> None:
         """Abort the current step. Pops without running tests. Records in history."""
         state = self.read_state()
         step_name = state.get("step")
@@ -233,7 +233,10 @@ class WorkflowDev(Workflow):
         if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
         self._pop_state()
-        self._append_history({"step": step_name, "status": "aborted"})
+        entry: dict[str, str] = {"step": step_name, "status": "aborted"}
+        if reason:
+            entry["reason"] = reason
+        self._append_history(entry)
         self._render_issue_todos()
 
     def _render_issue_todos(self) -> None:
@@ -255,7 +258,11 @@ class WorkflowDev(Workflow):
                 else:
                     lines.append(f"- [x] {step}")
             elif status == "aborted":
-                lines.append(f"- [x] \u26d4 {step} (aborted)")
+                reason = entry.get("reason", "")
+                if reason:
+                    lines.append(f'- [x] \u26d4 {step} ([aborted](## "{reason}"))')
+                else:
+                    lines.append(f"- [x] \u26d4 {step} (aborted)")
         # Render active step from stack (if any)
         for frame in sf["stack"][1:]:  # skip root frame
             step = frame.get("step")
@@ -501,8 +508,9 @@ def main() -> None:
         wd.end_step()
         print("Step complete; back to idle")
     elif command == CMD_ABORT_STEP:
-        wd.abort_step()
-        print("Step aborted; back to idle")
+        reason = sys.argv[2] if len(sys.argv) > 2 else ""
+        wd.abort_step(reason)
+        print(f"Step aborted; back to idle" + (f" ({reason})" if reason else ""))
     elif command == CMD_REQUEST_REVIEW:
         wd.request_review()
         print("Review requested; edits blocked. Invoke /code-review now.")
