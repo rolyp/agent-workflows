@@ -686,7 +686,7 @@ class PaperAuthoring(Workflow):
             if phase is not Phase.PLANNING:
                 return False, (
                     f"Cannot edit plan files outside planning phase. "
-                    f"Use `status_tracker.py {CMD_CREATE_PLAN}` first."
+                    f"Use `workflow.py {CMD_CREATE_PLAN}` first."
                 )
             return True, ""
 
@@ -699,18 +699,18 @@ class PaperAuthoring(Workflow):
         # Phase-based blocks
         if phase is Phase.IDLE:
             return False, (
-                f"No active task. Use `status_tracker.py {CMD_SELECT_TASK}` or "
-                f"`status_tracker.py {CMD_SELECT_AD_HOC}` first."
+                f"No active task. Use `workflow.py {CMD_SELECT_TASK}` or "
+                f"`workflow.py {CMD_SELECT_AD_HOC}` first."
             )
         if phase is Phase.TRIAGE:
             return False, (
                 "Cannot edit .tex files during triage phase. "
-                f"Run `status_tracker.py {CMD_APPROVE_TRIAGE}` to enter editing cycle first."
+                f"Run `workflow.py {CMD_APPROVE_TRIAGE}` to enter editing cycle first."
             )
         if phase is Phase.PLANNING:
             return False, (
                 "Cannot edit .tex files during planning phase. "
-                f"Run `status_tracker.py {CMD_APPROVE_PLAN}` to return to edit phase first."
+                f"Run `workflow.py {CMD_APPROVE_PLAN}` to return to edit phase first."
             )
 
         # Change markup required in all .tex edits
@@ -742,7 +742,7 @@ class PaperAuthoring(Workflow):
                 if phase is Phase.AUTHOR_REVIEW:
                     return False, (
                         f"Cannot edit .tex files during author-review phase (task: {task}). "
-                        f"Run `status_tracker.py {CMD_REVIEW_TO_EDIT}` first."
+                        f"Run `workflow.py {CMD_REVIEW_TO_EDIT}` first."
                     )
 
         return True, ""
@@ -770,7 +770,7 @@ class PaperAuthoring(Workflow):
         if "workflow/plans/" in rel_path and rel_path.endswith(".md"):
             return False, (
                 f"Cannot create plan files directly. "
-                f"Use `status_tracker.py {CMD_CREATE_PLAN}` instead."
+                f"Use `workflow.py {CMD_CREATE_PLAN}` instead."
             )
 
         full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
@@ -915,7 +915,7 @@ def main() -> None:
         command = sys.argv[1]
 
     try:
-        tracker = PaperAuthoring(Path.cwd())
+        pa = PaperAuthoring(Path.cwd())
     except FileNotFoundError as e:
         print(str(e))
         sys.exit(0)  # non-fatal for hooks — project may not use workflow
@@ -929,7 +929,7 @@ def main() -> None:
             sys.exit(1)
 
     if command == CMD_STARTUP:
-        state = tracker.read_state()
+        state = pa.read_state()
         phase = state["phase"]
         task = state.get("task")
         summary = f"Workflow state: {phase}"
@@ -937,86 +937,86 @@ def main() -> None:
             summary += f" — {task}"
         print(summary)
     elif command == CMD_BEGIN_TRIAGE:
-        tracker.begin_triage()
+        pa.begin_triage()
         print("Entered triage phase")
     elif command == CMD_RECLASSIFY:
         if len(sys.argv) < 4:
-            print(f"Usage: status_tracker.py {CMD_RECLASSIFY} <note-id> <structural|minor>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_RECLASSIFY} <note-id> <structural|minor>", file=sys.stderr)
             sys.exit(1)
-        tracker.reclassify(sys.argv[2], sys.argv[3])
+        pa.reclassify(sys.argv[2], sys.argv[3])
         print(f"Reclassified {sys.argv[2]} → {sys.argv[3]}")
     elif command == CMD_ADD_TASK:
         if len(sys.argv) < 5:
-            print(f"Usage: status_tracker.py {CMD_ADD_TASK} <note-id> <description> <structural|minor>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_ADD_TASK} <note-id> <description> <structural|minor>", file=sys.stderr)
             sys.exit(1)
-        tracker.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
+        pa.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
         print(f"Added {sys.argv[4]} task: {sys.argv[3]}")
     elif command == CMD_APPROVE_TRIAGE:
-        tracker.approve_triage()
+        pa.approve_triage()
         print("Triage complete; entering idle")
     elif command == CMD_SELECT_TASK:
         if len(sys.argv) < 4:
-            print(f"Usage: status_tracker.py {CMD_SELECT_TASK} <note-id> <regions-json>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_SELECT_TASK} <note-id> <regions-json>", file=sys.stderr)
             print(f"  regions-json: [[\"file\", \"passage\"], ...]", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[3])
-        tracker.select_task(sys.argv[2], [(r[0], r[1]) for r in regions])
+        pa.select_task(sys.argv[2], [(r[0], r[1]) for r in regions])
         print(f"Selected task: {sys.argv[2]} ({len(regions)} region(s))")
     elif command == CMD_SELECT_AD_HOC:
         if len(sys.argv) < 3:
-            print(f"Usage: status_tracker.py {CMD_SELECT_AD_HOC} <regions-json>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_SELECT_AD_HOC} <regions-json>", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[2])
-        tracker.select_ad_hoc([(r[0], r[1]) for r in regions])
+        pa.select_ad_hoc([(r[0], r[1]) for r in regions])
         print(f"Ad hoc edit started ({len(regions)} region(s))")
     elif command == CMD_CREATE_PLAN:
         if len(sys.argv) < 3:
-            print(f"Usage: status_tracker.py {CMD_CREATE_PLAN} <plan-name>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_CREATE_PLAN} <plan-name>", file=sys.stderr)
             sys.exit(1)
-        plan_path = tracker.create_plan(sys.argv[2])
+        plan_path = pa.create_plan(sys.argv[2])
         print(f"Plan created: {plan_path}")
     elif command == CMD_APPROVE_PLAN:
-        tracker.approve_plan()
+        pa.approve_plan()
         print("Plan approved; returning to edit phase")
     elif command == CMD_ADD_SUBTASK:
         if len(sys.argv) < 4:
-            print(f"Usage: status_tracker.py {CMD_ADD_SUBTASK} <subtask-id> <description>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_ADD_SUBTASK} <subtask-id> <description>", file=sys.stderr)
             sys.exit(1)
-        tracker.add_subtask(sys.argv[2], sys.argv[3])
+        pa.add_subtask(sys.argv[2], sys.argv[3])
         print(f"Added subtask: {sys.argv[2]}")
     elif command == CMD_SELECT_SUBTASK:
         if len(sys.argv) < 4:
-            print(f"Usage: status_tracker.py {CMD_SELECT_SUBTASK} <subtask-id> <regions-json>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_SELECT_SUBTASK} <subtask-id> <regions-json>", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[3])
-        tracker.select_subtask(sys.argv[2], [(r[0], r[1]) for r in regions])
+        pa.select_subtask(sys.argv[2], [(r[0], r[1]) for r in regions])
         print(f"Selected subtask: {sys.argv[2]} ({len(regions)} region(s))")
     elif command == CMD_COMPLETE_TASK:
-        tracker.complete_task()
+        pa.complete_task()
         print("Task completed")
     elif command == CMD_OPEN_REVIEW:
         if len(sys.argv) < 4:
-            print(f"Usage: status_tracker.py {CMD_OPEN_REVIEW} <file_path> <passage>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_OPEN_REVIEW} <file_path> <passage>", file=sys.stderr)
             sys.exit(1)
-        tracker.open_review(sys.argv[2], sys.argv[3])
+        pa.open_review(sys.argv[2], sys.argv[3])
         print(f"Review bars placed in {sys.argv[2]}")
     elif command == CMD_CLOSE_REVIEW:
         if len(sys.argv) < 3:
-            print(f"Usage: status_tracker.py {CMD_CLOSE_REVIEW} <file_path>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_CLOSE_REVIEW} <file_path>", file=sys.stderr)
             sys.exit(1)
-        tracker.close_review(sys.argv[2])
+        pa.close_review(sys.argv[2])
         print(f"Review bars removed from {sys.argv[2]}")
     elif command == CMD_EDIT_TO_REVIEW:
-        tracker.edit_to_review()
+        pa.edit_to_review()
         print("Bars: edit → review")
     elif command == CMD_REVIEW_TO_EDIT:
-        tracker.review_to_edit()
+        pa.review_to_edit()
         print("Bars: review → edit")
     elif command == CMD_CHECK_EDIT:
         if len(sys.argv) < 3:
-            print(f"Usage: status_tracker.py {CMD_CHECK_EDIT} <file_path>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_CHECK_EDIT} <file_path>", file=sys.stderr)
             sys.exit(1)
-        allowed, message = tracker.check_edit(sys.argv[2])
+        allowed, message = pa.check_edit(sys.argv[2])
         if not allowed:
             print(message, file=sys.stderr)
             sys.exit(2)
