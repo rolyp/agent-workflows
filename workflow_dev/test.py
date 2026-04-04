@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from workflow_dev.workflow import WorkflowDev, Phase, RefactoringMode, _is_test_file
+from workflow_dev.workflow import WorkflowDev, Phase, StepMode, _is_test_file
 
 
 class TestFixture(unittest.TestCase):
@@ -67,179 +67,111 @@ class ConstructorTest(TestFixture):
 
 
 class StateTransitionTest(TestFixture):
-    def test_start_task_enters_idle(self):
+    def test_begin_task_enters_idle(self):
         wd = self._make_wd()
-        wd.start_task("extract-base")
+        wd.begin_task("extract-base")
         state = wd.read_state()
         self.assertEqual(state["phase"], "refactoring")
         self.assertEqual(state["task"], "extract-base")
-        self.assertNotIn("mode", state)  # idle = no mode
-
-    def test_start_task_rejects_non_idle(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        with self.assertRaises(ValueError):
-            wd.start_task("task-2")
-
-    def test_begin_refactor_pushes_mode(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
-        self.assertEqual(wd.read_state()["mode"], "refactor-code")
-
-    def test_end_refactor_pops_to_idle(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        wd.end_refactor()
-        state = wd.read_state()
         self.assertNotIn("mode", state)
 
-    def test_cannot_nest_refactor(self):
+    def test_begin_task_rejects_non_idle(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
+        wd.begin_task("task-1")
         with self.assertRaises(ValueError):
-            wd.begin_refactor("expand-coverage")
+            wd.begin_task("task-2")
 
-    def test_review_of_refactoring_approves_to_idle(self):
+    def test_begin_step_pushes_frame(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        wd.end_refactor()
+        wd.begin_task("task-1")
+        wd.begin_step("Fix imports", "code")
+        state = wd.read_state()
+        self.assertEqual(state["step"], "[refactor/code] Fix imports")
+        self.assertEqual(state["mode"], "code")
+
+    def test_end_step_pops_to_idle(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Fix imports", "code")
+        wd.end_step()
+        state = wd.read_state()
+        self.assertNotIn("step", state)
+        self.assertNotIn("mode", state)
+
+    def test_nested_steps(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Outer", "code")
+        wd.begin_step("Inner", "code")
+        self.assertEqual(wd.read_state()["step"], "[refactor/code] Inner")
+        wd.end_step()
+        self.assertEqual(wd.read_state()["step"], "[refactor/code] Outer")
+        wd.end_step()
+        self.assertNotIn("step", wd.read_state())
+
+    def test_modify_step(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Add feature", "modify")
+        state = wd.read_state()
+        self.assertEqual(state["mode"], "modify")
+        self.assertEqual(state["phase"], "modifying")
+
+    def test_request_review_only_from_idle(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        with self.assertRaises(ValueError):
+            wd.request_review()
+
+    def test_review_approve_returns_to_idle(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "test")
+        wd.end_step()
         wd.request_review()
-        self.assertEqual(wd.read_state()["review_of"], "refactoring")
+        self.assertEqual(wd.read_state()["phase"], "review")
         wd.approve()
         self.assertEqual(wd.read_state()["phase"], "refactoring")
         self.assertNotIn("mode", wd.read_state())
 
-    def test_begin_modify_enters_modifying(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_modify("add feature X")
-        state = wd.read_state()
-        self.assertEqual(state["phase"], "modifying")
-        self.assertEqual(state["modify_description"], "add feature X")
-
-    def test_begin_modify_only_from_idle(self):
-        wd = self._make_wd()
-        with self.assertRaises(ValueError):
-            wd.begin_modify("nope")  # no task
-        wd2 = self._make_wd()
-        wd2.start_task("task-1")
-        wd2.begin_refactor("refactor-code")
-        with self.assertRaises(ValueError):
-            wd2.begin_modify("nope")  # in refactor mode, not idle
-
-    def test_back_to_refactor(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_modify("feature X")
-        wd.back_to_refactor()
-        state = wd.read_state()
-        self.assertEqual(state["phase"], "refactoring")
-        self.assertNotIn("mode", state)
-
-    def test_review_of_modifying_approves_to_refactoring(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_modify("feature X")
-        wd.request_review()
-        self.assertEqual(wd.read_state()["review_of"], "modifying")
-        wd.approve()
-        self.assertEqual(wd.read_state()["phase"], "refactoring")
-
-    def test_complete_task_after_review(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        wd.end_refactor()
-        wd.request_review()
-        wd.approve()
-        wd.complete_task()
-        self.assertEqual(wd.read_state()["phase"], "idle")
-
-    def test_complete_task_without_review_fails(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        with self.assertRaises(ValueError) as ctx:
-            wd.complete_task()
-        self.assertIn("No review on record", str(ctx.exception))
-
     def test_feedback_returns_to_idle(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        wd.end_refactor()
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        wd.end_step()
         wd.request_review()
         wd.feedback()
         state = wd.read_state()
         self.assertEqual(state["phase"], "refactoring")
-        self.assertNotIn("mode", state)
         self.assertEqual(state["task"], "task-1")
 
-    def test_feedback_from_modify_review_returns_to_idle(self):
+    def test_end_task_after_review(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_modify("feature X")
-        wd.request_review()
-        wd.feedback()
-        state = wd.read_state()
-        self.assertEqual(state["phase"], "refactoring")
-        self.assertNotIn("mode", state)
-
-    def test_begin_step_pushes_frame(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
-        wd.begin_step("fix-import")
-        state = wd.read_state()
-        self.assertEqual(state["step"], "[refactor/code] fix-import")
-        self.assertEqual(state["phase"], "refactoring")
-
-    def test_end_step_pops_frame(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
-        wd.begin_step("fix-import")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
         wd.end_step()
-        state = wd.read_state()
-        self.assertNotIn("step", state)
-        self.assertEqual(state["mode"], "refactor-code")  # back in refactor frame
+        wd.request_review()
+        wd.approve()
+        wd.end_task()
+        self.assertEqual(wd.read_state()["phase"], "idle")
 
-    def test_cannot_nest_steps(self):
+    def test_end_task_without_review_fails(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
-        wd.begin_step("step-1")
+        wd.begin_task("task-1")
         with self.assertRaises(ValueError):
-            wd.begin_step("step-2")
+            wd.end_task()
 
-    def test_cannot_request_review_during_refactor(self):
+    def test_end_step_at_root_raises(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
-        with self.assertRaises(ValueError):
-            wd.request_review()
-
-    def test_end_step_without_begin_raises(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
+        wd.begin_task("task-1")
         with self.assertRaises(ValueError):
             wd.end_step()
-
-    def test_step_preserves_mode(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        wd.begin_step("add-tests")
-        self.assertEqual(wd.read_state()["mode"], "expand-coverage")
 
     def test_invalid_transitions(self):
         wd = self._make_wd()
         with self.assertRaises(ValueError):
-            wd.begin_refactor("refactor-code")  # no task
+            wd.begin_step("Work", "code")  # no task
         with self.assertRaises(ValueError):
             wd.request_review()  # no task
         with self.assertRaises(ValueError):
@@ -247,50 +179,49 @@ class StateTransitionTest(TestFixture):
 
 
 class CheckEditTest(TestFixture):
+    def test_blocked_no_task(self):
+        wd = self._make_wd()
+        allowed, msg = wd.check_edit("workflow.py")
+        self.assertFalse(allowed)
+
     def test_blocked_in_idle(self):
         wd = self._make_wd()
-        allowed, msg = wd.check_edit("workflow.py")
-        self.assertFalse(allowed)
-        self.assertIn("start-task", msg)
-
-    def test_blocked_in_task_idle(self):
-        wd = self._make_wd()
-        wd.start_task("task-1")
+        wd.begin_task("task-1")
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
 
-    def test_refactor_test_allows_test_edit(self):
+    def test_code_step_allows_code(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        allowed, msg = wd.check_edit("test.py")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        allowed, _ = wd.check_edit("workflow.py")
         self.assertTrue(allowed)
 
-    def test_refactor_test_blocks_code_edit(self):
+    def test_code_step_blocks_test(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        allowed, msg = wd.check_edit("workflow.py")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        allowed, _ = wd.check_edit("test.py")
         self.assertFalse(allowed)
 
-    def test_refactor_code_allows_code_edit(self):
+    def test_test_step_allows_test(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
-        allowed, msg = wd.check_edit("workflow.py")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "test")
+        allowed, _ = wd.check_edit("test.py")
         self.assertTrue(allowed)
 
-    def test_refactor_code_blocks_test_edit(self):
+    def test_test_step_blocks_code(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("refactor-code")
-        allowed, msg = wd.check_edit("test.py")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "test")
+        allowed, _ = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
 
-    def test_modifying_allows_all(self):
+    def test_modify_step_allows_all(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_modify("feature X")
+        wd.begin_task("task-1")
+        wd.begin_step("Feature", "modify")
         allowed_code, _ = wd.check_edit("workflow.py")
         allowed_test, _ = wd.check_edit("test.py")
         self.assertTrue(allowed_code)
@@ -298,57 +229,58 @@ class CheckEditTest(TestFixture):
 
     def test_review_blocks_all(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_modify("feature X")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        wd.end_step()
         wd.request_review()
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
-        self.assertIn("review", msg)
 
     def test_file_outside_project_allowed(self):
         wd = self._make_wd()
-        allowed, msg = wd.check_edit("/Users/someone/.claude/memory/test.md")
+        allowed, _ = wd.check_edit("/Users/someone/.claude/memory/test.md")
         self.assertTrue(allowed)
 
 
 class CheckWriteTest(TestFixture):
-    def test_blocked_in_idle(self):
+    def test_blocked_no_task(self):
         wd = self._make_wd()
-        allowed, msg = wd.check_write("new_file.py")
+        allowed, _ = wd.check_write("new_file.py")
         self.assertFalse(allowed)
 
-    def test_refactor_test_allows_new_test(self):
+    def test_test_step_allows_new_test(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        allowed, msg = wd.check_write("test_new.py")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "test")
+        allowed, _ = wd.check_write("test_new.py")
         self.assertTrue(allowed)
 
-    def test_refactor_test_blocks_new_code(self):
+    def test_test_step_blocks_new_code(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_refactor("expand-coverage")
-        allowed, msg = wd.check_write("new_module.py")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "test")
+        allowed, _ = wd.check_write("new_module.py")
         self.assertFalse(allowed)
 
-    def test_modifying_allows_all(self):
+    def test_modify_step_allows_all(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_modify("feature X")
-        allowed, msg = wd.check_write("new_module.py")
+        wd.begin_task("task-1")
+        wd.begin_step("Feature", "modify")
+        allowed, _ = wd.check_write("new_module.py")
         self.assertTrue(allowed)
 
     def test_review_blocks_all(self):
         wd = self._make_wd()
-        wd.start_task("task-1")
-        wd.begin_modify("feature X")
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        wd.end_step()
         wd.request_review()
-        allowed, msg = wd.check_write("new_file.py")
+        allowed, _ = wd.check_write("new_file.py")
         self.assertFalse(allowed)
 
     def test_file_outside_project_allowed(self):
         wd = self._make_wd()
-        allowed, msg = wd.check_write("/tmp/scratch.txt")
+        allowed, _ = wd.check_write("/tmp/scratch.txt")
         self.assertTrue(allowed)
 
 

@@ -30,26 +30,21 @@ class Phase(Enum):
     REVIEW = "review"
 
 
-class RefactoringMode(Enum):
-    EXPAND_COVERAGE = "expand-coverage"
-    REFACTOR_CODE = "refactor-code"
+class StepMode(Enum):
+    CODE = "code"
+    TEST = "test"
+    MODIFY = "modify"
 
 
 # CLI command names
 CMD_STARTUP = "startup"
-CMD_START_TASK = "start-task"
-CMD_BEGIN_REFACTOR = "begin-refactor"
-CMD_END_REFACTOR = "end-refactor"
+CMD_BEGIN_TASK = "begin-task"
+CMD_END_TASK = "end-task"
 CMD_BEGIN_STEP = "begin-step"
 CMD_END_STEP = "end-step"
-CMD_BEGIN_SUBTASK = "begin-subtask"
-CMD_END_SUBTASK = "end-subtask"
-CMD_BEGIN_MODIFY = "begin-modify"
-CMD_BACK_TO_REFACTOR = "back-to-refactor"
 CMD_REQUEST_REVIEW = "request-review"
-CMD_APPROVE = "approve"
-CMD_FEEDBACK = "feedback"
-CMD_COMPLETE_TASK = "complete-task"
+CMD_RESPOND_APPROVE = "respond-review/approve"
+CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 
 
 def _is_test_file(path: str) -> bool:
@@ -86,15 +81,14 @@ class WorkflowDev(Workflow):
         """Derive the appropriate label from a state frame."""
         phase = state.get("phase")
         mode = state.get("mode")
-        if phase == Phase.MODIFYING.value:
-            return self.LABEL_MODIFY
         if phase == Phase.REVIEW.value:
             return self.LABEL_REVIEW
-        if phase == Phase.REFACTORING.value and mode:
-            if mode == RefactoringMode.EXPAND_COVERAGE.value:
-                return self.LABEL_REFACTOR_TEST
-            if mode == RefactoringMode.REFACTOR_CODE.value:
-                return self.LABEL_REFACTOR_CODE
+        if mode == StepMode.CODE.value:
+            return self.LABEL_REFACTOR_CODE
+        if mode == StepMode.TEST.value:
+            return self.LABEL_REFACTOR_TEST
+        if mode == StepMode.MODIFY.value:
+            return self.LABEL_MODIFY
         return self.LABEL_IDLE
 
     def _pop_state(self, validate: bool = True) -> dict:
@@ -149,23 +143,6 @@ class WorkflowDev(Workflow):
 
     # --- Commands ---
 
-    def start_task(self, task: str, issue_number: str | None = None) -> None:
-        """Start a task; enter refactoring phase (locked until sub-mode chosen).
-
-        If issue_number is provided, stores the issue URL in state and
-        sets project status to In Progress.
-        """
-        phase = self._read_phase()
-        if phase is not Phase.IDLE:
-            raise ValueError(f"Cannot start task: current phase is {phase.value}, expected idle")
-        issue_url = None
-        if issue_number:
-            repo = self.get_repo()
-            issue_url = f"https://github.com/{repo}/issues/{issue_number}"
-            self.set_issue_status(issue_url, "In Progress")
-        self._write_state(Phase.REFACTORING, task, issue_url=issue_url)
-        self._set_label(self.LABEL_IDLE)
-
     def _issue_url_from_state(self) -> str | None:
         """Get issue URL from the bottom of the state stack (root task)."""
         stack = self._read_stack()
@@ -183,71 +160,60 @@ class WorkflowDev(Workflow):
         if issue_url:
             self.clear_issue_labels(issue_url)
 
-    def begin_refactor(self, mode: str) -> None:
-        """Push a refactoring frame (code or test). Only from idle."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"begin-refactor only available during refactoring (current: {phase.value})")
-        state = self.read_state()
-        if state.get("mode"):
-            raise ValueError(
-                f"Already in {state['mode']}. Run end-refactor first."
-            )
-        if mode not in (RefactoringMode.REFACTOR_CODE.value, RefactoringMode.EXPAND_COVERAGE.value):
-            raise ValueError(f"Unknown refactoring mode: {mode} (use 'code' or 'test')")
-        self._push_state(Phase.REFACTORING, state.get("task"), mode=mode)
-        label = (self.LABEL_REFACTOR_CODE if mode == RefactoringMode.REFACTOR_CODE.value
-                 else self.LABEL_REFACTOR_TEST)
-        self._set_label(label)
-
-    def end_refactor(self) -> None:
-        """Pop the refactoring frame. Runs tests first."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"end-refactor only available during refactoring (current: {phase.value})")
-        state = self.read_state()
-        if not state.get("mode"):
-            raise ValueError("Not in a refactoring mode. Nothing to end.")
+    def _is_idle(self) -> bool:
+        """True if at root frame with no mode (idle within a task)."""
         stack = self._read_stack()
-        if len(stack) <= 1:
-            raise ValueError("Cannot pop root frame with end-refactor.")
-        self._run_tests()
-        self._pop_state()
+        return len(stack) == 1 and self._read_phase() is Phase.REFACTORING
 
-    def _mode_tag(self, mode: str) -> str:
-        """Return the display tag for a refactoring mode."""
-        if mode == RefactoringMode.REFACTOR_CODE.value:
-            return "[refactor/code]"
-        if mode == RefactoringMode.EXPAND_COVERAGE.value:
-            return "[refactor/test]"
-        return "[unknown]"
-
-    def begin_step(self, name: str) -> None:
-        """Begin a named refactoring step. Pushes a frame; marks todo as active."""
+    def begin_task(self, task: str, issue_number: str | None = None) -> None:
+        """Start a task. Sets root frame to idle (refactoring, no mode)."""
         phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"begin-step only available during refactoring (current: {phase.value})")
+        if phase is not Phase.IDLE:
+            raise ValueError(f"Cannot begin task: current phase is {phase.value}, expected idle")
+        issue_url = None
+        if issue_number:
+            repo = self.get_repo()
+            issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+            self.set_issue_status(issue_url, "In Progress")
+        self._write_state(Phase.REFACTORING, task, issue_url=issue_url)
+        self._set_label(self.LABEL_IDLE)
+
+    def begin_step(self, description: str, mode: str) -> None:
+        """Push a step frame. Mode is 'code', 'test', or 'modify'."""
+        if mode not in (m.value for m in StepMode):
+            raise ValueError(f"Unknown mode: {mode} (use code, test, or modify)")
+        phase = self._read_phase()
+        if phase not in (Phase.REFACTORING, Phase.MODIFYING):
+            raise ValueError(f"begin-step not available in {phase.value}")
         state = self.read_state()
-        if not state.get("mode"):
-            raise ValueError("begin-step requires an active refactoring mode. Run begin-refactor first.")
-        if state.get("step"):
-            raise ValueError(f"Already in step '{state['step']}'. Run end-step first.")
-        tagged_name = f"{self._mode_tag(state['mode'])} {name}"
-        self._push_state(Phase.REFACTORING, state.get("task"), step=tagged_name,
-                         mode=state.get("mode"))
+        step_mode = StepMode(mode)
+        # Map mode to Phase for the pushed frame
+        frame_phase = Phase.MODIFYING if step_mode is StepMode.MODIFY else Phase.REFACTORING
+        # Map mode to label
+        label_map = {
+            StepMode.CODE: self.LABEL_REFACTOR_CODE,
+            StepMode.TEST: self.LABEL_REFACTOR_TEST,
+            StepMode.MODIFY: self.LABEL_MODIFY,
+        }
+        # Tag the description with the mode
+        tag = f"[refactor/{mode}]" if step_mode is not StepMode.MODIFY else "[modify]"
+        tagged = f"{tag} {description}"
+        self._push_state(frame_phase, state.get("task"),
+                         step=tagged, mode=mode)
+        self._set_label(label_map[step_mode])
         issue_url = self._issue_url_from_state()
         if issue_url:
-            self.activate_issue_todo(issue_url, tagged_name)
+            self.activate_issue_todo(issue_url, tagged)
 
     def end_step(self) -> None:
-        """End the current refactoring step. Runs tests, checks off todo."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"end-step only available during refactoring (current: {phase.value})")
+        """Pop the current step. Runs tests first. Checks off todo with commit link."""
         state = self.read_state()
-        if not state.get("step"):
-            raise ValueError("No step in progress. Use `begin-step <name>` first.")
         step_name = state.get("step")
+        if not step_name:
+            raise ValueError("No step in progress.")
+        stack = self._read_stack()
+        if len(stack) <= 1:
+            raise ValueError("Cannot pop root frame.")
         self._run_tests()
         self._pop_state()
         issue_url = self._issue_url_from_state()
@@ -258,94 +224,22 @@ class WorkflowDev(Workflow):
             ).stdout.strip()
             self.complete_issue_todo(issue_url, step_name, commit_sha=head_sha)
 
-    def begin_subtask(self, title: str) -> str:
-        """Create a sub-issue for a substantial subtask. Returns the sub-issue URL."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"begin-subtask only available during refactoring (current: {phase.value})")
-        issue_url = self._issue_url_from_state()
-        if not issue_url:
-            raise ValueError("No issue URL in state; use start-task with an issue number first")
-        sub_url = self.create_sub_issue(issue_url, title)
-        state = self.read_state()
-        self._push_state(Phase.REFACTORING, state.get("task"),
-                         issue_url=sub_url, mode=state.get("mode"))
-        self.set_issue_label(sub_url, self.LABEL_IDLE)
-        self.set_issue_status(sub_url, "In Progress")
-        return sub_url
-
-    def end_subtask(self) -> None:
-        """Complete the current subtask. Closes the sub-issue."""
-        stack = self._read_stack()
-        if len(stack) <= 1:
-            raise ValueError("No subtask in progress.")
-        self._run_tests()
-        issue_url = self._issue_url_from_state()
-        self._pop_state()
-        if issue_url:
-            self.set_issue_status(issue_url, "Done")
-            self.clear_issue_labels(issue_url)
-            env = self._gh_env()
-            number = self._get_issue_number(issue_url)
-            subprocess.run(
-                ["gh", "issue", "close", number, "--repo", self.get_repo()],
-                capture_output=True, text=True, env=env,
-            )
-
-    def begin_modify(self, description: str) -> None:
-        """Enter modifying phase with explicit scope. Only available from idle (depth 1, no mode)."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"begin-modify only available during refactoring (current: {phase.value})")
-        stack = self._read_stack()
-        if len(stack) > 1:
-            raise ValueError("Cannot begin modify with pushed frames. Pop back to idle first.")
-        state = self.read_state()
-        if state.get("mode"):
-            raise ValueError(
-                f"Cannot begin modify while in {state['mode']}. "
-                f"Run end-refactor to return to idle first."
-            )
-        self._write_state(Phase.MODIFYING, state.get("task"), modify_description=description)
-        self._set_label(self.LABEL_MODIFY)
-
-    def back_to_refactor(self) -> None:
-        """Return from modifying to refactoring (locked)."""
-        phase = self._read_phase()
-        if phase is not Phase.MODIFYING:
-            raise ValueError(f"back-to-refactor only available during modifying (current: {phase.value})")
-        state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"))
-        self._set_label(self.LABEL_IDLE)
-
     def request_review(self) -> None:
-        """Request code review. Only available from idle (stack depth 1, no mode)."""
-        phase = self._read_phase()
-        state = self.read_state()
-        stack = self._read_stack()
-        if len(stack) > 1:
-            raise ValueError("Cannot request review with pushed frames. Pop back to idle first.")
-        if phase is Phase.REFACTORING and state.get("mode"):
-            raise ValueError(
-                f"Cannot request review while in {state['mode']}. "
-                f"Run end-refactor to return to idle first."
-            )
-        if phase not in (Phase.REFACTORING, Phase.MODIFYING):
-            raise ValueError(f"request-review only available during refactoring or modifying (current: {phase.value})")
+        """Request code review. Only from idle (root frame, no mode)."""
+        if not self._is_idle():
+            raise ValueError("request-review only available from idle. Run end-step first.")
         self._run_tests()
         self._check_ci()
-        # Record the SHA at review time
         head_sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
         state = self.read_state()
-        self._write_state(Phase.REVIEW, state.get("task"),
-                          review_of=phase.value, reviewed_sha=head_sha)
+        self._write_state(Phase.REVIEW, state.get("task"), reviewed_sha=head_sha)
         self._set_label(self.LABEL_REVIEW)
 
     def approve(self) -> None:
-        """Approve review; always return to refactoring."""
+        """Approve review; return to idle."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"approve only available during review (current: {phase.value})")
@@ -354,7 +248,7 @@ class WorkflowDev(Workflow):
         self._set_label(self.LABEL_IDLE)
 
     def feedback(self, items: list[str] | None = None) -> None:
-        """Review feedback; return to refactoring. Optionally add todo items for fixes."""
+        """Review feedback; return to idle. Optionally add todo items."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"feedback only available during review (current: {phase.value})")
@@ -366,14 +260,10 @@ class WorkflowDev(Workflow):
             if issue_url:
                 self.add_issue_todos(issue_url, items)
 
-    def complete_task(self) -> None:
+    def end_task(self) -> None:
         """Complete the current task. Requires review since last code change."""
-        phase = self._read_phase()
-        if phase is not Phase.REFACTORING:
-            raise ValueError(f"complete-task only available during refactoring (current: {phase.value})")
-        stack = self._read_stack()
-        if len(stack) > 1:
-            raise ValueError("Step or subtask still in progress. Complete it first.")
+        if not self._is_idle():
+            raise ValueError("end-task only available from idle. Run end-step first.")
 
         state = self.read_state()
         reviewed_sha = state.get("reviewed_sha")
@@ -390,7 +280,6 @@ class WorkflowDev(Workflow):
                 f"HEAD: {head_sha[:8]}). Run request-review again."
             )
 
-        # Close issue
         issue_url = self._issue_url_from_state()
         if issue_url:
             self.set_issue_status(issue_url, "Done")
@@ -405,87 +294,45 @@ class WorkflowDev(Workflow):
 
     # --- Hook gates ---
 
+    def _check_file_access(self, rel_path: str) -> tuple[bool, str]:
+        """Shared gate logic for check_edit and check_write."""
+        phase = self._read_phase()
+        state = self.read_state()
+        mode = state.get("mode")
+
+        if phase is Phase.IDLE:
+            return False, f"No active task. Use `workflow.py {CMD_BEGIN_TASK} <task>` first."
+
+        if phase is Phase.REVIEW:
+            return False, "Edits blocked during review."
+
+        if phase is Phase.REFACTORING and not mode:
+            return False, f"Idle — no step active. Use `workflow.py {CMD_BEGIN_STEP} <desc> <code|test|modify>` first."
+
+        if mode == StepMode.CODE.value:
+            if _is_test_file(rel_path):
+                return False, "In code mode: only code files are editable."
+        elif mode == StepMode.TEST.value:
+            if not _is_test_file(rel_path):
+                return False, "In test mode: only test files are editable."
+        # StepMode.MODIFY: all files allowed
+
+        return True, ""
+
     def check_edit(self, file_path: str, old_string: str | None = None,
                    new_string: str | None = None) -> tuple[bool, str]:
-        """Gate edits based on current phase and refactoring mode."""
+        """Gate edits based on current step mode."""
         rel_path = self._resolve(file_path)
         if rel_path is None:
-            return True, ""  # outside project root
-
-        phase = self._read_phase()
-        state = self.read_state()
-
-        if phase is Phase.IDLE:
-            return False, (
-                f"No active task. Use `workflow.py {CMD_START_TASK} <task>` first."
-            )
-
-        if phase is Phase.REVIEW:
-            return False, (
-                "Edits blocked during review. "
-                f"Use `workflow.py {CMD_APPROVE}` or `workflow.py {CMD_FEEDBACK}` first."
-            )
-
-        if phase is Phase.REFACTORING:
-            mode = state.get("mode")
-            if mode is None:
-                return False, (
-                    "Refactoring phase entered but no mode selected. "
-                    f"Use `workflow.py {CMD_BEGIN_REFACTOR} <code|test>` first."
-                )
-            is_test = _is_test_file(rel_path)
-            if mode == RefactoringMode.EXPAND_COVERAGE.value and not is_test:
-                return False, (
-                    f"In expand-coverage mode: only test files are editable. "
-                    f"Run `end-refactor` then `{CMD_BEGIN_REFACTOR} code` to switch."
-                )
-            if mode == RefactoringMode.REFACTOR_CODE.value and is_test:
-                return False, (
-                    f"In refactor-code mode: only code files are editable. "
-                    f"Run `end-refactor` then `{CMD_BEGIN_REFACTOR} test` to switch."
-                )
-
-        # Phase.MODIFYING: all edits allowed
-        return True, ""
+            return True, ""
+        return self._check_file_access(rel_path)
 
     def check_write(self, file_path: str) -> tuple[bool, str]:
-        """Gate file creation based on current phase and refactoring mode."""
+        """Gate file creation based on current step mode."""
         rel_path = self._resolve(file_path)
         if rel_path is None:
-            return True, ""  # outside project root
-
-        phase = self._read_phase()
-        state = self.read_state()
-
-        if phase is Phase.IDLE:
-            return False, (
-                f"No active task. Use `workflow.py {CMD_START_TASK} <task>` first."
-            )
-
-        if phase is Phase.REVIEW:
-            return False, (
-                "File creation blocked during review."
-            )
-
-        if phase is Phase.REFACTORING:
-            mode = state.get("mode")
-            if mode is None:
-                return False, (
-                    "Refactoring phase entered but no mode selected. "
-                    f"Use `workflow.py {CMD_BEGIN_REFACTOR} <code|test>` first."
-                )
-            is_test = _is_test_file(rel_path)
-            if mode == RefactoringMode.EXPAND_COVERAGE.value and not is_test:
-                return False, (
-                    "In expand-coverage mode: only test files can be created."
-                )
-            if mode == RefactoringMode.REFACTOR_CODE.value and is_test:
-                return False, (
-                    "In refactor-code mode: only code files can be created."
-                )
-
-        # Phase.MODIFYING: all writes allowed
-        return True, ""
+            return True, ""
+        return self._check_file_access(rel_path)
 
     # --- Helpers ---
 
@@ -573,78 +420,50 @@ def main() -> None:
         state = wd.read_state()
         phase = state["phase"]
         task = state.get("task")
+        step = state.get("step")
         mode = state.get("mode")
         summary = f"Workflow state: {phase} · milestone: {milestone}"
         if task:
             summary += f" — {task}"
-        if mode:
+        if step:
+            summary += f" · step: {step}"
+        elif mode:
             summary += f" ({mode})"
         print(summary)
-    elif command == CMD_START_TASK:
+    elif command == CMD_BEGIN_TASK:
         if len(sys.argv) < 3:
-            print(f"Usage: workflow.py {CMD_START_TASK} <task-name> [issue-number]", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_BEGIN_TASK} <task-name> [issue-number]", file=sys.stderr)
             sys.exit(1)
         issue_number = sys.argv[3] if len(sys.argv) > 3 else None
-        wd.start_task(sys.argv[2], issue_number)
-        msg = f"Started task: {sys.argv[2]} (refactoring, locked)"
+        wd.begin_task(sys.argv[2], issue_number)
+        msg = f"Task started: {sys.argv[2]} (idle)"
         if issue_number:
             msg += f" · issue #{issue_number} → In Progress"
         print(msg)
-    elif command == CMD_BEGIN_REFACTOR:
-        if len(sys.argv) < 3 or sys.argv[2] not in ("code", "test"):
-            print(f"Usage: workflow.py {CMD_BEGIN_REFACTOR} <code|test>", file=sys.stderr)
-            sys.exit(1)
-        mode = RefactoringMode.REFACTOR_CODE.value if sys.argv[2] == "code" else RefactoringMode.EXPAND_COVERAGE.value
-        wd.begin_refactor(mode)
-        print(f"Refactoring: {sys.argv[2]}")
-    elif command == CMD_END_REFACTOR:
-        wd.end_refactor()
-        print("Refactoring complete; back to idle")
     elif command == CMD_BEGIN_STEP:
-        if len(sys.argv) < 3:
-            print(f"Usage: workflow.py {CMD_BEGIN_STEP} <step-name>", file=sys.stderr)
+        if len(sys.argv) < 4 or sys.argv[3] not in ("code", "test", "modify"):
+            print(f"Usage: workflow.py {CMD_BEGIN_STEP} <description> <code|test|modify>", file=sys.stderr)
             sys.exit(1)
-        wd.begin_step(sys.argv[2])
-        print(f"Started step: {sys.argv[2]}")
+        wd.begin_step(sys.argv[2], sys.argv[3])
+        print(f"Step: [{sys.argv[3]}] {sys.argv[2]}")
     elif command == CMD_END_STEP:
         wd.end_step()
-        print("Step complete; tests passed")
-    elif command == CMD_BEGIN_SUBTASK:
-        if len(sys.argv) < 3:
-            print(f"Usage: workflow.py {CMD_BEGIN_SUBTASK} <title>", file=sys.stderr)
-            sys.exit(1)
-        url = wd.begin_subtask(sys.argv[2])
-        print(f"Started subtask: {sys.argv[2]} → {url}")
-    elif command == CMD_END_SUBTASK:
-        wd.end_subtask()
-        print("Subtask complete; sub-issue closed")
-    elif command == CMD_BEGIN_MODIFY:
-        if len(sys.argv) < 3:
-            print(f"Usage: workflow.py {CMD_BEGIN_MODIFY} <description>", file=sys.stderr)
-            sys.exit(1)
-        wd.begin_modify(sys.argv[2])
-        print(f"Entering modifying: {sys.argv[2]}")
-    elif command == CMD_BACK_TO_REFACTOR:
-        wd.back_to_refactor()
-        print("Back to refactoring (locked)")
+        print("Step complete; back to idle")
     elif command == CMD_REQUEST_REVIEW:
         wd.request_review()
-        state = wd.read_state()
-        review_of = state.get("review_of", "unknown")
-        print(f"Review requested (reviewing {review_of}); edits blocked. Invoke /code-review now.")
-    elif command == CMD_APPROVE:
+        print("Review requested; edits blocked. Invoke /code-review now.")
+    elif command == CMD_RESPOND_APPROVE:
         wd.approve()
-        phase = wd.read_state()["phase"]
-        print(f"Review approved; entering {phase}")
-    elif command == CMD_FEEDBACK:
+        print("Review approved; back to idle")
+    elif command == CMD_RESPOND_FEEDBACK:
         items = sys.argv[2:] if len(sys.argv) > 2 else None
         wd.feedback(items)
-        msg = "Review feedback; returning to refactoring (locked)"
+        msg = "Review feedback; back to idle"
         if items:
             msg += f" · {len(items)} todo(s) added to issue"
         print(msg)
-    elif command == CMD_COMPLETE_TASK:
-        wd.complete_task()
+    elif command == CMD_END_TASK:
+        wd.end_task()
         print("Task complete; issue closed")
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
