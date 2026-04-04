@@ -9,7 +9,10 @@ Follow whenever working on the agent-workflows submodule. See [dashboard](../das
 | **Developer** | — | — | Human; reviews, approves, directs |
 | **Dev Assistant** | [`dev-assistant`](skills/dev-assistant/SKILL.md) (background) | Always active | Drives implementation; orchestrates other skills |
 | **Tester** | [`/tester`](skills/tester/SKILL.md) | Inline or subagent | Runs and writes tests for workflow code |
-| **Code Reviewer** | [`/code-review`](skills/code-review/SKILL.md) | Forced at `request-review`; also ad hoc | Reviews for consolidation, code smells, fragile implementations |
+| **User Reviewer** | [`user-review`](skills/user-review/SKILL.md) | Subagent at `request-review` | Expert user; reviews for workflow robustness, transparency, fitness for purpose |
+| **Architect Reviewer** | [`architect-review`](skills/architect-review/SKILL.md) | Subagent at `request-review` | Expert architect; reviews for design integrity, clear responsibilities, invariant enforcement |
+
+Both reviewers run as subagents in **separate context** (fresh perspective, no shared development biases). Invoked in parallel at `request-review`.
 
 ---
 
@@ -144,8 +147,9 @@ When `end-step` fails (tests don't pass):
 - Fix with `begin-step <desc> modify`; remove decorator
 
 ### Review
-- `request-review` from idle; **Code Reviewer** examines work
-- `respond-review/approve` returns to idle; `respond-review/feedback` returns with new todos
+- `request-review` from idle; spawns **User Reviewer** and **Architect Reviewer** as parallel subagents in separate context
+- Both reviewers read the code fresh — no shared development biases
+- Dev Assistant collates findings; `respond-review/approve` or `respond-review/feedback [items...]`
 - Mandatory before `end-task`; `reviewed_sha` must match HEAD
 
 ### GitHub integration

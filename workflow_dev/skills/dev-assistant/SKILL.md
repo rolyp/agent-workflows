@@ -21,4 +21,4 @@ Post-push hook automatically records the CI run ID. `request-review` will block 
 ## Working with other skills
 
 - **Tester**: invoke for writing new tests or diagnosing test failures. For quick test runs, invoke inline
-- **Code Reviewer**: invoked at `request-review`; also available ad hoc via `/code-review`
+- **User Reviewer** + **Architect Reviewer**: both invoked as parallel subagents at `request-review`. They run in separate context (fresh perspective). Collate their findings and present to Developer for `respond-review/approve` or `respond-review/feedback`
