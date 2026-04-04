@@ -178,6 +178,10 @@ class WorkflowDev(Workflow):
             issue_url = f"https://github.com/{repo}/issues/{issue_number}"
             self.set_issue_status(issue_url, "In Progress")
         self._write_state(Phase.REFACTORING, task, issue_url=issue_url)
+        # Clear history from previous task
+        sf = self._read_state_file()
+        sf["history"] = []
+        self._save_stack(sf["stack"], history=sf["history"])
         self._set_label(self.LABEL_IDLE)
 
     def begin_step(self, description: str, mode: str) -> None:
@@ -186,9 +190,21 @@ class WorkflowDev(Workflow):
             raise ValueError(f"Unknown mode: {mode} (use code, test, or modify)")
         phase = self._read_phase()
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
-            raise ValueError(f"begin-step not available in {phase.value}")
+            raise ValueError(f"begin-step not available in {phase.value}. Use begin-task first.")
         state = self.read_state()
+        if state.get("end_step_failed"):
+            raise ValueError(
+                "Previous end-step failed. Fix the code and retry end-step, "
+                "or use abort-step to roll back."
+            )
         step_mode = StepMode(mode)
+        # Forbid nesting modify inside code/test (would undermine mode discipline)
+        parent_mode = state.get("mode")
+        if parent_mode in (StepMode.CODE.value, StepMode.TEST.value) and step_mode is StepMode.MODIFY:
+            raise ValueError(
+                f"Cannot nest modify step inside {parent_mode} step. "
+                f"End the current step first, then begin-step with modify."
+            )
         # Map mode to Phase for the pushed frame
         frame_phase = Phase.MODIFYING if step_mode is StepMode.MODIFY else Phase.REFACTORING
         # Map mode to label
@@ -214,7 +230,12 @@ class WorkflowDev(Workflow):
         sf = self._read_state_file()
         if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
-        self._run_tests()  # raises on failure — step stays on stack
+        try:
+            self._run_tests()
+        except (RuntimeError, FileNotFoundError):
+            sf["stack"][-1]["end_step_failed"] = True
+            self._save_stack(sf["stack"], history=sf["history"])
+            raise
         # Use last_commit from frame (set by post-commit hook), falling back to HEAD
         commit_sha = state.get("last_commit") or subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -317,7 +338,16 @@ class WorkflowDev(Workflow):
         if items:
             issue_url = self._issue_url_from_state()
             if issue_url:
-                self.add_issue_todos(issue_url, items)
+                # Insert feedback todos ABOVE the steps marker (they're task requirements)
+                body = self._read_issue_body(issue_url)
+                new_items = "\n".join(f"- [ ] {item}" for item in items)
+                marker = "<!-- steps -->"
+                if marker in body:
+                    idx = body.index(marker)
+                    body = body[:idx] + new_items + "\n\n" + body[idx:]
+                else:
+                    body = f"{body}\n{new_items}" if body else new_items
+                self._write_issue_body(issue_url, body)
 
     def end_task(self) -> None:
         """Complete the current task. Requires review since last code change."""
