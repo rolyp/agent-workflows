@@ -5,6 +5,16 @@ import json
 import sys
 from pathlib import Path
 
+
+def _is_protocol_suspended():
+    for sp in [Path("state.json"), Path.cwd() / "state.json"]:
+        if sp.exists():
+            try:
+                sf = json.loads(sp.read_text())
+                if isinstance(sf, dict): return sf.get("protocol_suspended", False)
+            except: pass
+    return False
+
 # Add agent-workflows root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -18,6 +28,9 @@ def main() -> None:
     old_string = inputs.get("old_string")
     new_string = inputs.get("new_string")
     if not file_path:
+        return
+
+    if _is_protocol_suspended():
         return
 
     if Path(file_path).name == "state.json":
