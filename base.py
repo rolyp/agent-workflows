@@ -420,15 +420,37 @@ class Workflow(ABC):
                             commit_sha: str) -> None:
         """Check off a todo item, linking to the commit that completed it.
 
-        Matches the item with any emoji prefix (mode-coloured or legacy).
+        Matches unchecked items or previously failed items containing the item text.
         """
         body = self._read_issue_body(issue_url)
         repo = self.get_repo()
         checked = f"- [x] {item} ([{commit_sha[:7]}](https://github.com/{repo}/commit/{commit_sha}))"
-        # Find and replace the unchecked line containing this item
+        # Find the line containing this item (unchecked, or previously failed)
+        for line in body.split("\n"):
+            if item in line and ("- [ ] " in line or "\u274c" in line):
+                body = body.replace(line, checked, 1)
+                self._write_issue_body(issue_url, body)
+                return
+        raise RuntimeError(f"Todo item not found in issue: {item}")
+
+    def fail_issue_todo(self, issue_url: str, item: str) -> None:
+        """Mark a todo as failed. Leaves it visible in the issue body as history."""
+        body = self._read_issue_body(issue_url)
+        failed = f"- [x] \u274c {item} (failed)"  # ❌
+        for line in body.split("\n"):
+            if item in line and ("- [ ] " in line or "\u274c" in line):
+                body = body.replace(line, failed, 1)
+                self._write_issue_body(issue_url, body)
+                return
+        raise RuntimeError(f"Todo item not found in issue: {item}")
+
+    def abort_issue_todo(self, issue_url: str, item: str) -> None:
+        """Mark a todo as aborted. Leaves it visible in the issue body as history."""
+        body = self._read_issue_body(issue_url)
+        aborted = f"- [x] \u26d4 {item} (aborted)"  # ⛔
         for line in body.split("\n"):
             if line.startswith("- [ ] ") and item in line:
-                body = body.replace(line, checked, 1)
+                body = body.replace(line, aborted, 1)
                 self._write_issue_body(issue_url, body)
                 return
         raise RuntimeError(f"Todo item not found in issue: {item}")

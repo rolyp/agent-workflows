@@ -226,6 +226,10 @@ class WorkflowDev(Workflow):
             # Mark step as failed — blocks begin-step until fixed
             stack[-1]["end_step_failed"] = True
             self._save_stack(stack)
+            # Record failure in issue body
+            issue_url = self._issue_url_from_state()
+            if issue_url and step_name:
+                self.fail_issue_todo(issue_url, step_name)
             raise
         self._pop_state()
         issue_url = self._issue_url_from_state()
@@ -237,14 +241,18 @@ class WorkflowDev(Workflow):
             self.complete_issue_todo(issue_url, step_name, commit_sha=head_sha)
 
     def abort_step(self) -> None:
-        """Abort the current step. Pops without running tests. Does NOT check off todo."""
+        """Abort the current step. Pops without running tests. Marks todo as aborted."""
         state = self.read_state()
-        if not state.get("step"):
+        step_name = state.get("step")
+        if not step_name:
             raise ValueError("No step in progress.")
         stack = self._read_stack()
         if len(stack) <= 1:
             raise ValueError("Cannot pop root frame.")
         self._pop_state()
+        issue_url = self._issue_url_from_state()
+        if issue_url and step_name:
+            self.abort_issue_todo(issue_url, step_name)
 
     def request_review(self) -> None:
         """Request code review. Only from idle (root frame, no mode)."""

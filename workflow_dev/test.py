@@ -7,8 +7,10 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from workflow_dev.workflow import WorkflowDev, Phase, StepMode, _is_test_file
+from base import Workflow
 
 
 class TestFixture(unittest.TestCase):
@@ -319,6 +321,83 @@ class CheckWriteTest(TestFixture):
         wd = self._make_wd()
         allowed, _ = wd.check_write("/tmp/scratch.txt")
         self.assertTrue(allowed)
+
+
+class TodoMarkingTest(unittest.TestCase):
+    """Tests for issue body todo marking (fail/abort/complete)."""
+
+    def setUp(self):
+        self.body = ""
+
+    def _mock_read(self, url):
+        return self.body
+
+    def _mock_write(self, url, body):
+        self.body = body
+
+    def _make_workflow(self):
+        """Create a WorkflowDev with mocked issue body read/write."""
+        orig_dir = os.getcwd()
+        test_dir = Path(tempfile.mkdtemp())
+        os.chdir(test_dir)
+        (test_dir / "test.sh").write_text("#!/bin/bash\nexit 0\n")
+        (test_dir / "test.sh").chmod(0o755)
+        import subprocess
+        subprocess.run(["git", "init"], capture_output=True, cwd=test_dir)
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"],
+                       capture_output=True, cwd=test_dir)
+        wd = WorkflowDev(test_dir)
+        wd._read_issue_body = self._mock_read
+        wd._write_issue_body = self._mock_write
+        self._test_dir = test_dir
+        self._orig_dir = orig_dir
+        return wd
+
+    def tearDown(self):
+        os.chdir(self._orig_dir)
+        shutil.rmtree(self._test_dir)
+
+    def test_activate_adds_mode_emoji(self):
+        wd = self._make_workflow()
+        wd.activate_issue_todo("url", "[refactor/code] Fix thing", "code")
+        self.assertIn("🟢 [refactor/code] Fix thing", self.body)
+        self.assertIn("- [ ]", self.body)
+
+    def test_complete_replaces_with_commit_link(self):
+        wd = self._make_workflow()
+        self.body = "- [ ] 🟢 [refactor/code] Fix thing"
+        wd._get_issue_number = lambda url: "1"
+        wd.get_repo = lambda: "owner/repo"
+        wd.complete_issue_todo("url", "[refactor/code] Fix thing", "abc1234def")
+        self.assertIn("- [x]", self.body)
+        self.assertIn("abc1234", self.body)
+        self.assertNotIn("- [ ]", self.body)
+
+    def test_fail_marks_with_cross(self):
+        wd = self._make_workflow()
+        self.body = "- [ ] 🟢 [refactor/code] Fix thing"
+        wd.fail_issue_todo("url", "[refactor/code] Fix thing")
+        self.assertIn("❌", self.body)
+        self.assertIn("(failed)", self.body)
+        self.assertNotIn("- [ ]", self.body)
+
+    def test_abort_marks_with_stop(self):
+        wd = self._make_workflow()
+        self.body = "- [ ] 🟠 [modify] Add feature"
+        wd.abort_issue_todo("url", "[modify] Add feature")
+        self.assertIn("⛔", self.body)
+        self.assertIn("(aborted)", self.body)
+        self.assertNotIn("- [ ]", self.body)
+
+    def test_complete_after_fail_replaces_failed_entry(self):
+        wd = self._make_workflow()
+        self.body = "- [x] ❌ [refactor/code] Fix thing (failed)"
+        wd._get_issue_number = lambda url: "1"
+        wd.get_repo = lambda: "owner/repo"
+        wd.complete_issue_todo("url", "[refactor/code] Fix thing", "abc1234def")
+        self.assertIn("- [x]", self.body)
+        self.assertIn("abc1234", self.body)
+        self.assertNotIn("❌", self.body)
 
 
 if __name__ == "__main__":
