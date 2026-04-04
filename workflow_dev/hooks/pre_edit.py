@@ -20,6 +20,10 @@ def main() -> None:
     if not file_path:
         return
 
+    if Path(file_path).name == "state.json":
+        print("Cannot edit state.json directly. Use workflow.py commands.", file=sys.stderr)
+        sys.exit(2)
+
     wd = WorkflowDev(Path.cwd())
 
     allowed, message = wd.check_edit(file_path, old_string, new_string)

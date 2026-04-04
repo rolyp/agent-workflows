@@ -29,6 +29,15 @@
             "command": "python3 workflow_dev/hooks/pre_write.py"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 workflow_dev/hooks/pre_bash.py"
+          }
+        ]
       }
     ],
     "PostToolUse": [

@@ -17,6 +17,10 @@ def main() -> None:
     if not file_path:
         return
 
+    if Path(file_path).name == "state.json":
+        print("Cannot write state.json directly. Use workflow.py commands.", file=sys.stderr)
+        sys.exit(2)
+
     wd = WorkflowDev(Path.cwd())
 
     allowed, message = wd.check_write(file_path)
