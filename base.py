@@ -134,9 +134,28 @@ class Workflow(ABC):
             raise RuntimeError(f"{key} not set (checked env and .claude/settings.local.json)")
         return value
 
+    def _get_env_optional(self, key: str) -> str | None:
+        """Get env var, falling back to .claude/settings.local.json. Returns None if not set."""
+        value = os.environ.get(key, "")
+        if value:
+            return value
+        settings_path = self.root / ".claude" / "settings.local.json"
+        if settings_path.exists():
+            settings = json.loads(settings_path.read_text())
+            value = settings.get("env", {}).get(key, "")
+        return value or None
+
     def _gh_env(self, token_key: str = "GH_TOKEN") -> dict:
-        """Build env dict for subprocess calls with the given token."""
-        return {**os.environ, "GH_TOKEN": self._get_env(token_key)}
+        """Build env dict for subprocess calls with the given token.
+
+        Falls back to GH_TOKEN if the requested key isn't set.
+        """
+        token = self._get_env_optional(token_key)
+        if not token and token_key != "GH_TOKEN":
+            token = self._get_env_optional("GH_TOKEN")
+        if not token:
+            raise RuntimeError(f"Neither {token_key} nor GH_TOKEN is set")
+        return {**os.environ, "GH_TOKEN": token}
 
     # --- GitHub integration ---
 
