@@ -66,6 +66,18 @@ class WorkflowDev(Workflow):
     def _phase_enum(self) -> type[Phase]:
         return Phase
 
+    # Workflow-dev-specific labels
+    LABEL_IDLE = "\u26aa idle"                     # ⚪ idle
+    LABEL_REFACTOR_TEST = "\U0001f7e2 refactor/test"  # 🟢 refactor/test
+    LABEL_REFACTOR_CODE = "\U0001f7e2 refactor/code"  # 🟢 refactor/code
+    LABEL_MODIFY = "\U0001f7e0 modify"                # 🟠 modify
+    LABEL_REVIEW = "\U0001f7e1 review"                # 🟡 review
+
+    WORKFLOW_LABELS: tuple[str, ...] = (
+        LABEL_IDLE, LABEL_REFACTOR_TEST, LABEL_REFACTOR_CODE,
+        LABEL_MODIFY, LABEL_REVIEW,
+    )
+
     # Fields carried forward from previous frame unless overridden
     _CARRY_FORWARD = ("issue_url", "reviewed_sha")
 
