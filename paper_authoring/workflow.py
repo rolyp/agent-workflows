@@ -344,45 +344,67 @@ class PaperAuthoring(Workflow):
 
     AD_HOC = "Ad hoc"
 
-    def select_task(self, note_id: str, regions: list[tuple[str, str]]) -> None:
-        """Select a named task from To Do; move to In Progress; place edit bars.
+    def select_task(self, task_ref: str, regions: list[tuple[str, str]]) -> None:
+        """Select a task; move to In Progress; place edit bars.
 
-        regions is a list of (file_path, passage) pairs to place edit bars around.
+        task_ref: either a note_id (reads from dashboard) or an issue number
+        (reads from GitHub). Numeric strings are treated as issue numbers.
+        regions: list of (file_path, passage) pairs to place edit bars around.
         """
         if not regions:
             raise ValueError("At least one edit region required")
-        dashboard = self._read_dashboard()
-        # Find and remove the task line from To do
-        pattern = rf"^- .+#note-{re.escape(note_id)}\).*$"
-        match = re.search(pattern, dashboard, re.MULTILINE)
-        if not match:
-            raise ValueError(f"Task '{note_id}' not found in To do")
-        task_line = match.group(0)
-        # Extract description, note link, and issue URL from task line
-        desc_match = re.match(r"^- (.+?) \(\[note\]\((.+?)\)\)(.*)$", task_line)
-        description = desc_match.group(1) if desc_match else task_line[2:]
-        note_link = desc_match.group(2) if desc_match else None
-        suffix = desc_match.group(3) if desc_match else ""
-        # Extract issue URL if present
-        issue_match = re.search(r"\[issue\]\((.+?)\)", suffix)
-        issue_url = issue_match.group(1) if issue_match else None
-        # Remove from To do
-        dashboard = dashboard.replace(task_line + "\n", "")
-        self.dashboard_path.write_text(dashboard)
+
+        issue_url: str | None = None
+        note_link: str | None = None
+
+        if task_ref.isdigit():
+            # Issue-based: read from GitHub
+            repo = self.get_repo()
+            issue_url = f"https://github.com/{repo}/issues/{task_ref}"
+            env = self._gh_env()
+            result = subprocess.run(
+                ["gh", "issue", "view", task_ref, "--repo", repo,
+                 "--json", "title", "--jq", ".title"],
+                capture_output=True, text=True, env=env,
+            )
+            if result.returncode != 0:
+                raise ValueError(f"Issue #{task_ref} not found: {result.stderr}")
+            description = result.stdout.strip()
+            note_id = task_ref
+            note_link = None
+        else:
+            # Note-based: read from dashboard (legacy)
+            note_id = task_ref
+            dashboard = self._read_dashboard()
+            pattern = rf"^- .+#note-{re.escape(note_id)}\).*$"
+            match = re.search(pattern, dashboard, re.MULTILINE)
+            if not match:
+                raise ValueError(f"Task '{note_id}' not found in To do")
+            task_line = match.group(0)
+            desc_match = re.match(r"^- (.+?) \(\[note\]\((.+?)\)\)(.*)$", task_line)
+            description = desc_match.group(1) if desc_match else task_line[2:]
+            note_link = desc_match.group(2) if desc_match else None
+            suffix = desc_match.group(3) if desc_match else ""
+            issue_match = re.search(r"\[issue\]\((.+?)\)", suffix)
+            issue_url = issue_match.group(1) if issue_match else None
+            # Remove from To do
+            dashboard = dashboard.replace(task_line + "\n", "")
+            self.dashboard_path.write_text(dashboard)
+
         # Place edit bars
         for file_path, passage in regions:
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
-        # Update state and render In Progress from state
+        # Update state
         self._write_state(Phase.EDIT, note_id, regions=regions,
                           description=description, note_link=note_link,
                           issue_url=issue_url)
-        # Update GitHub if issue is linked
+        # Update GitHub
         if issue_url:
             try:
                 self.set_issue_status(issue_url, "In Progress")
                 self.set_issue_label(issue_url, self.LABEL_EDIT)
             except Exception:
-                pass  # GitHub integration is best-effort for now
+                pass
 
     def select_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
@@ -492,7 +514,9 @@ class PaperAuthoring(Workflow):
     def _increment_done_count(self) -> None:
         """Increment the completed count for the current task's kind."""
         state = self.read_state()
-        note_link = state.get("note_link", "")
+        note_link = state.get("note_link")
+        if not note_link:
+            return  # issue-based task, no dashboard count to update
         kind = "minor" if "minor-issues.md" in str(note_link) else "structural"
         dashboard = self._read_dashboard()
         count_pattern = rf"(Completed {kind}.*?\()(\d+)( of \d+\))"
