@@ -194,7 +194,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_refactor("refactor-code")
         wd.begin_step("fix-import")
         state = wd.read_state()
-        self.assertEqual(state["step"], "fix-import")
+        self.assertEqual(state["step"], "[refactor/code] fix-import")
         self.assertEqual(state["phase"], "refactoring")
 
     def test_end_step_pops_frame(self):

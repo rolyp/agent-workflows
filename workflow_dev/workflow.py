@@ -214,6 +214,14 @@ class WorkflowDev(Workflow):
         self._run_tests()
         self._pop_state()
 
+    def _mode_tag(self, mode: str) -> str:
+        """Return the display tag for a refactoring mode."""
+        if mode == RefactoringMode.REFACTOR_CODE.value:
+            return "[refactor/code]"
+        if mode == RefactoringMode.EXPAND_COVERAGE.value:
+            return "[refactor/test]"
+        return "[unknown]"
+
     def begin_step(self, name: str) -> None:
         """Begin a named refactoring step. Pushes a frame; marks todo as active."""
         phase = self._read_phase()
@@ -224,11 +232,12 @@ class WorkflowDev(Workflow):
             raise ValueError("begin-step requires an active refactoring mode. Run begin-refactor first.")
         if state.get("step"):
             raise ValueError(f"Already in step '{state['step']}'. Run end-step first.")
-        self._push_state(Phase.REFACTORING, state.get("task"), step=name,
+        tagged_name = f"{self._mode_tag(state['mode'])} {name}"
+        self._push_state(Phase.REFACTORING, state.get("task"), step=tagged_name,
                          mode=state.get("mode"))
         issue_url = self._issue_url_from_state()
         if issue_url:
-            self.activate_issue_todo(issue_url, name)
+            self.activate_issue_todo(issue_url, tagged_name)
 
     def end_step(self) -> None:
         """End the current refactoring step. Runs tests, checks off todo."""
