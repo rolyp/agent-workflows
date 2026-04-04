@@ -292,17 +292,23 @@ class WorkflowDev(Workflow):
             if step:
                 emoji = self.MODE_EMOJI.get(mode, "\u26aa")
                 lines.append(f"- [ ] {emoji} {step}")
-        # Read existing body, find the step section, replace it
+        # Read existing body, find the steps section, replace it
         body = self._read_issue_body(issue_url)
-        # Split at the step section marker or append
-        marker = "<!-- steps -->"
-        if marker in body:
-            before = body[:body.index(marker) + len(marker)]
-            rendered = before + "\n" + "\n".join(lines) + "\n"
+        section_start = "## Steps"
+        section_end = "---"
+        rendered_section = f"{section_start}\n\n" + "\n".join(lines) + f"\n\n{section_end}"
+        if section_start in body:
+            # Replace existing section (from heading to next ---)
+            start_idx = body.index(section_start)
+            end_idx = body.find(section_end, start_idx + len(section_start))
+            if end_idx != -1:
+                end_idx += len(section_end)
+            else:
+                end_idx = len(body)
+            body = body[:start_idx] + rendered_section + body[end_idx:]
         else:
-            # No marker — append after a blank line
-            rendered = body.rstrip() + f"\n\n{marker}\n" + "\n".join(lines) + "\n"
-        self._write_issue_body(issue_url, rendered)
+            body = body.rstrip() + f"\n\n{rendered_section}\n"
+        self._write_issue_body(issue_url, body)
 
     def request_review(self) -> None:
         """Request code review. Only from idle (root frame, no mode)."""
@@ -338,12 +344,12 @@ class WorkflowDev(Workflow):
         if items:
             issue_url = self._issue_url_from_state()
             if issue_url:
-                # Insert feedback todos ABOVE the steps marker (they're task requirements)
+                # Insert feedback todos ABOVE the Steps section
                 body = self._read_issue_body(issue_url)
                 new_items = "\n".join(f"- [ ] {item}" for item in items)
-                marker = "<!-- steps -->"
-                if marker in body:
-                    idx = body.index(marker)
+                section = "## Steps"
+                if section in body:
+                    idx = body.index(section)
                     body = body[:idx] + new_items + "\n\n" + body[idx:]
                 else:
                     body = f"{body}\n{new_items}" if body else new_items
