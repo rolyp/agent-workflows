@@ -24,16 +24,20 @@ Follows the refactor-first principle: tests are **behaviour-preservation witness
 - **Test both allowed and disallowed cases** for hook gates
 - **Tests enable refactoring.** When tests pass after a code change, that's evidence behaviour is preserved. When they fail, that's a signal the change wasn't purely structural
 
-## Bug regression pattern
+## `@expectedFailure` pattern
 
-When capturing a known bug as a test:
+Use `@unittest.expectedFailure` to describe behaviour that doesn't exist yet, during the refactoring phase. The modifying phase then makes it pass by implementing the feature or fixing the bug.
 
 1. Write the test asserting **correct** (desired) behaviour
 2. Decorate with `@unittest.expectedFailure`
 3. Tests pass — the expected failure counts as OK
-4. In the modifying phase, fix the code and remove the decorator — the test now passes normally
+4. In the modifying phase, implement the feature (or fix the bug) and remove the decorator
 
-This keeps the test as a description of what *should* happen, not what currently (wrongly) does.
+This applies equally to:
+- **Bug fixes:** the test describes what the code *should* do; the bug is the gap
+- **New features (TDD):** the test describes desired behaviour that doesn't exist yet; the feature fills the gap
+
+In both cases, the test is written during refactoring (it's additive — doesn't change existing behaviour) and the implementation happens during modifying.
 
 ## Conventions
 
