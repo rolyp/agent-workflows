@@ -346,7 +346,7 @@ class Workflow(ABC):
     LABEL_MODIFY = "\U0001f7e0 modify"                # 🟠 modify
     LABEL_REVIEW = "\U0001f7e1 review"                # 🟡 review
 
-    WORKFLOW_LABELS = (
+    WORKFLOW_LABELS: tuple[str, ...] = (
         LABEL_IDLE, LABEL_REFACTOR_TEST, LABEL_REFACTOR_CODE,
         LABEL_MODIFY, LABEL_REVIEW,
     )

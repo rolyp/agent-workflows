@@ -66,6 +66,19 @@ class Phase(Enum):
 
 
 class PaperAuthoring(Workflow):
+    # Paper-authoring-specific labels
+    LABEL_IDLE = "\u26aa idle"                     # ⚪ idle
+    LABEL_TRIAGE = "\U0001f7e3 triage"             # 🟣 triage
+    LABEL_EDIT = "\U0001f7e2 edit"                 # 🟢 edit
+    LABEL_PLANNING = "\U0001f535 planning"          # 🔵 planning
+    LABEL_REVIEW = "\U0001f7e1 author-review"      # 🟡 author-review
+    LABEL_CLOSEOUT = "\U0001f7e0 closeout"         # 🟠 closeout
+
+    WORKFLOW_LABELS = (
+        LABEL_IDLE, LABEL_TRIAGE, LABEL_EDIT,
+        LABEL_PLANNING, LABEL_REVIEW, LABEL_CLOSEOUT,
+    )
+
     def __init__(self, project_root: Path):
         self.root = project_root
         self.dashboard_path = project_root / "workflow" / "dashboard.md"
@@ -167,7 +180,7 @@ class PaperAuthoring(Workflow):
         return Phase
 
     # Fields carried forward from the previous frame unless overridden
-    _CARRY_FORWARD = ("regions", "description", "note_link", "plan_link", "subtasks")
+    _CARRY_FORWARD = ("regions", "description", "note_link", "plan_link", "subtasks", "issue_url")
 
     @staticmethod
     def _normalize_regions(regions: object) -> list[list[str]]:
@@ -345,10 +358,14 @@ class PaperAuthoring(Workflow):
         if not match:
             raise ValueError(f"Task '{note_id}' not found in To do")
         task_line = match.group(0)
-        # Extract description and note link from task line
+        # Extract description, note link, and issue URL from task line
         desc_match = re.match(r"^- (.+?) \(\[note\]\((.+?)\)\)(.*)$", task_line)
         description = desc_match.group(1) if desc_match else task_line[2:]
         note_link = desc_match.group(2) if desc_match else None
+        suffix = desc_match.group(3) if desc_match else ""
+        # Extract issue URL if present
+        issue_match = re.search(r"\[issue\]\((.+?)\)", suffix)
+        issue_url = issue_match.group(1) if issue_match else None
         # Remove from To do
         dashboard = dashboard.replace(task_line + "\n", "")
         self.dashboard_path.write_text(dashboard)
@@ -357,7 +374,15 @@ class PaperAuthoring(Workflow):
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
         # Update state and render In Progress from state
         self._write_state(Phase.EDIT, note_id, regions=regions,
-                          description=description, note_link=note_link)
+                          description=description, note_link=note_link,
+                          issue_url=issue_url)
+        # Update GitHub if issue is linked
+        if issue_url:
+            try:
+                self.set_issue_status(issue_url, "In Progress")
+                self.set_issue_label(issue_url, self.LABEL_EDIT)
+            except Exception:
+                pass  # GitHub integration is best-effort for now
 
     def select_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
@@ -432,6 +457,21 @@ class PaperAuthoring(Workflow):
                     self._place_bars(file_path, passage, EDIT_START, EDIT_END)
             self.assert_valid()
         else:
+            # Close GitHub issue if linked
+            state = self.read_state()
+            issue_url = state.get("issue_url")
+            if issue_url:
+                try:
+                    self.set_issue_status(issue_url, "Done")
+                    self.clear_issue_labels(issue_url)
+                    env = self._gh_env()
+                    number = self._get_issue_number(issue_url)
+                    subprocess.run(
+                        ["gh", "issue", "close", number, "--repo", self.get_repo()],
+                        capture_output=True, text=True, env=env,
+                    )
+                except Exception:
+                    pass
             self._increment_done_count()
             self._write_state(Phase.IDLE)
 
@@ -502,8 +542,15 @@ class PaperAuthoring(Workflow):
             text = text.replace(EDIT_END, REVIEW_END)
             Path(path).write_text(text)
         self._build()
-        task = self.read_state().get("task")
+        state = self.read_state()
+        task = state.get("task")
         self._write_state(Phase.AUTHOR_REVIEW, task)
+        issue_url = state.get("issue_url")
+        if issue_url:
+            try:
+                self.set_issue_label(issue_url, self.LABEL_REVIEW)
+            except Exception:
+                pass
 
     def review_to_edit(self) -> None:
         """Swap all review bars to edit bars; transition to edit phase."""
@@ -513,8 +560,15 @@ class PaperAuthoring(Workflow):
             text = text.replace(REVIEW_END, EDIT_END)
             Path(path).write_text(text)
         self._build()
-        task = self.read_state().get("task")
+        state = self.read_state()
+        task = state.get("task")
         self._write_state(Phase.EDIT, task)
+        issue_url = state.get("issue_url")
+        if issue_url:
+            try:
+                self.set_issue_label(issue_url, self.LABEL_EDIT)
+            except Exception:
+                pass
 
     def _build(self) -> None:
         """Run the build script if it exists."""
