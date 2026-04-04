@@ -285,7 +285,7 @@ class WorkflowDev(Workflow):
         self._render_issue_todos()
 
     def abort_step(self, reason: str = "") -> None:
-        """Abort the current step. Pops without running tests. Records in history."""
+        """Abort the current step. Reverts changes, pops without tests. Records in history."""
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
@@ -293,6 +293,16 @@ class WorkflowDev(Workflow):
         sf = self._read_state_file()
         if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
+        # Revert all uncommitted changes (true rollback)
+        subprocess.run(
+            ["git", "checkout", "--", "."],
+            capture_output=True, cwd=self.root,
+        )
+        # Remove any untracked files added during this step
+        subprocess.run(
+            ["git", "clean", "-fd"],
+            capture_output=True, cwd=self.root,
+        )
         self._pop_state()
         entry: dict[str, str] = {"step": step_name, "status": "aborted"}
         if reason:
