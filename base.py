@@ -363,7 +363,12 @@ class Workflow(ABC):
 
     # --- Issue body management ---
 
-    ACTIVE_MARKER = "\U0001f535"  # 🔵
+    # Mode emoji for active step markers (matches label colours)
+    MODE_EMOJI = {
+        "code": "\U0001f7e2",   # 🟢
+        "test": "\U0001f7e2",   # 🟢
+        "modify": "\U0001f7e0", # 🟠
+    }
 
     def _get_issue_number(self, issue_url: str) -> str:
         """Extract issue number from URL."""
@@ -403,44 +408,43 @@ class Workflow(ABC):
         body = f"{body}\n{new_items}" if body else new_items
         self._write_issue_body(issue_url, body)
 
-    def activate_issue_todo(self, issue_url: str, item: str) -> None:
-        """Mark a todo as active (🔵), deactivating any other."""
+    def activate_issue_todo(self, issue_url: str, item: str, mode: str) -> None:
+        """Add an unchecked todo with mode-coloured emoji. At most one unchecked todo at a time."""
+        emoji = self.MODE_EMOJI.get(mode, "\u26aa")  # fallback: ⚪
         body = self._read_issue_body(issue_url)
-        # Remove any existing active marker
-        body = body.replace(f" {self.ACTIVE_MARKER}", "")
-        # Add marker to the target item
-        target = f"- [ ] {item}"
-        if target not in body:
-            # Item doesn't exist yet — add it
-            body = f"{body}\n- [ ] {self.ACTIVE_MARKER} {item}" if body else f"- [ ] {self.ACTIVE_MARKER} {item}"
-        else:
-            body = body.replace(target, f"- [ ] {self.ACTIVE_MARKER} {item}", 1)
+        entry = f"- [ ] {emoji} {item}"
+        body = f"{body}\n{entry}" if body else entry
         self._write_issue_body(issue_url, body)
 
     def complete_issue_todo(self, issue_url: str, item: str,
                             commit_sha: str) -> None:
-        """Check off a todo item, linking to the commit that completed it."""
+        """Check off a todo item, linking to the commit that completed it.
+
+        Matches the item with any emoji prefix (mode-coloured or legacy).
+        """
         body = self._read_issue_body(issue_url)
         repo = self.get_repo()
-        # Match with or without active marker
-        active_unchecked = f"- [ ] {self.ACTIVE_MARKER} {item}"
-        plain_unchecked = f"- [ ] {item}"
         checked = f"- [x] {item} ([{commit_sha[:7]}](https://github.com/{repo}/commit/{commit_sha}))"
-        if active_unchecked in body:
-            body = body.replace(active_unchecked, checked, 1)
-        elif plain_unchecked in body:
-            body = body.replace(plain_unchecked, checked, 1)
-        else:
-            raise RuntimeError(f"Todo item not found in issue: {plain_unchecked}")
-        self._write_issue_body(issue_url, body)
+        # Find and replace the unchecked line containing this item
+        for line in body.split("\n"):
+            if line.startswith("- [ ] ") and item in line:
+                body = body.replace(line, checked, 1)
+                self._write_issue_body(issue_url, body)
+                return
+        raise RuntimeError(f"Todo item not found in issue: {item}")
 
     def get_active_todo(self, issue_url: str) -> str | None:
-        """Return the name of the active (🔵) todo, or None."""
+        """Return the name of the active (unchecked) todo, or None."""
         body = self._read_issue_body(issue_url)
-        marker = self.ACTIVE_MARKER
         for line in body.split("\n"):
-            if f"- [ ] {marker} " in line:
-                return line.split(f"- [ ] {marker} ", 1)[1].strip()
+            if line.startswith("- [ ] "):
+                # Strip emoji prefix if present
+                text = line[6:]  # after "- [ ] "
+                for emoji in self.MODE_EMOJI.values():
+                    if text.startswith(emoji + " "):
+                        text = text[len(emoji) + 1:]
+                        break
+                return text.strip()
         return None
 
     # --- Sub-issue management ---

@@ -209,7 +209,7 @@ class WorkflowDev(Workflow):
         self._set_label(label_map[step_mode])
         issue_url = self._issue_url_from_state()
         if issue_url:
-            self.activate_issue_todo(issue_url, tagged)
+            self.activate_issue_todo(issue_url, tagged, mode)
 
     def end_step(self) -> None:
         """Pop the current step. Runs tests first. Checks off todo with commit link."""
