@@ -238,7 +238,7 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
-            raise ValueError("No step in progress.")
+            raise ValueError("No step in progress. Use begin-step first.")
         sf = self._read_state_file()
         if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
@@ -262,7 +262,7 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
-            raise ValueError("No step in progress.")
+            raise ValueError("No step in progress. Use begin-step first.")
         sf = self._read_state_file()
         if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
