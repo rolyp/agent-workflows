@@ -338,6 +338,19 @@ class Workflow(ABC):
         item_id = self._find_project_item(issue_url, env)
         self._set_item_status(item_id, status, env)
 
+    def close_issue(self, issue_url: str) -> None:
+        """Set issue to Done, clear workflow labels, close on GitHub."""
+        self.set_issue_status(issue_url, "Done")
+        self.clear_issue_labels(issue_url)
+        env = self._gh_env()
+        number = self._get_issue_number(issue_url)
+        result = subprocess.run(
+            ["gh", "issue", "close", number, "--repo", self.get_repo()],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to close issue: {result.stderr}")
+
     # --- Issue label management ---
 
     LABEL_IDLE = "\u26aa idle"                     # ⚪ idle

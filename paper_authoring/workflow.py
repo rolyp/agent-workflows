@@ -469,14 +469,7 @@ class PaperAuthoring(Workflow):
             # Close sub-issue if linked
             if subtask_url:
                 try:
-                    self.set_issue_status(subtask_url, "Done")
-                    self.clear_issue_labels(subtask_url)
-                    env = self._gh_env()
-                    number = self._get_issue_number(subtask_url)
-                    subprocess.run(
-                        ["gh", "issue", "close", number, "--repo", self.get_repo()],
-                        capture_output=True, text=True, env=env,
-                    )
+                    self.close_issue(subtask_url)
                 except Exception:
                     pass
             # Mark subtask as completed in parent's list
@@ -498,14 +491,7 @@ class PaperAuthoring(Workflow):
             issue_url = state.get("issue_url")
             if issue_url:
                 try:
-                    self.set_issue_status(issue_url, "Done")
-                    self.clear_issue_labels(issue_url)
-                    env = self._gh_env()
-                    number = self._get_issue_number(issue_url)
-                    subprocess.run(
-                        ["gh", "issue", "close", number, "--repo", self.get_repo()],
-                        capture_output=True, text=True, env=env,
-                    )
+                    self.close_issue(issue_url)
                 except Exception:
                     pass
             self._increment_done_count()

@@ -377,14 +377,7 @@ class WorkflowDev(Workflow):
 
         issue_url = self._issue_url_from_state()
         if issue_url:
-            self.set_issue_status(issue_url, "Done")
-            self.clear_issue_labels(issue_url)
-            env = self._gh_env()
-            number = self._get_issue_number(issue_url)
-            subprocess.run(
-                ["gh", "issue", "close", number, "--repo", self.get_repo()],
-                capture_output=True, text=True, env=env,
-            )
+            self.close_issue(issue_url)
         self._write_state(Phase.IDLE)
 
     # --- Hook gates ---
