@@ -293,17 +293,18 @@ class WorkflowDev(Workflow):
         sf = self._read_state_file()
         if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
+        # Pop state first (before reverting files, since git checkout would revert state.json)
+        self._pop_state()
         # Revert all uncommitted changes (true rollback)
         subprocess.run(
-            ["git", "checkout", "--", "."],
+            ["git", "checkout", "--", ".", ":!state.json"],
             capture_output=True, cwd=self.root,
         )
         # Remove any untracked files added during this step
         subprocess.run(
-            ["git", "clean", "-fd"],
+            ["git", "clean", "-fd", "--", ".", ":!state.json"],
             capture_output=True, cwd=self.root,
         )
-        self._pop_state()
         entry: dict[str, str] = {"step": step_name, "status": "aborted"}
         if reason:
             entry["reason"] = reason

@@ -41,9 +41,9 @@ CMD_BEGIN_TRIAGE = "begin-triage"
 CMD_RECLASSIFY = "reclassify"
 CMD_ADD_TASK = "add-task"
 CMD_APPROVE_TRIAGE = "approve-triage"
-CMD_SELECT_TASK = "select-task"
-CMD_SELECT_AD_HOC = "select-ad-hoc-edit"
-CMD_COMPLETE_TASK = "complete-task"
+CMD_BEGIN_TASK = "begin-task"
+CMD_BEGIN_AD_HOC = "begin-ad-hoc"
+CMD_END_TASK = "end-task"
 CMD_OPEN_REVIEW = "open-review"
 CMD_CLOSE_REVIEW = "close-review"
 CMD_EDIT_TO_REVIEW = "edit-to-review"
@@ -51,7 +51,7 @@ CMD_REVIEW_TO_EDIT = "review-to-edit"
 CMD_CREATE_PLAN = "create-plan"
 CMD_APPROVE_PLAN = "approve-plan"
 CMD_ADD_SUBTASK = "add-subtask"
-CMD_SELECT_SUBTASK = "select-subtask"
+CMD_BEGIN_SUBTASK = "begin-subtask"
 CMD_CHECK_EDIT = "check-edit"
 
 
@@ -344,7 +344,7 @@ class PaperAuthoring(Workflow):
 
     AD_HOC = "Ad hoc"
 
-    def select_task(self, task_ref: str, regions: list[tuple[str, str]]) -> None:
+    def begin_task(self, task_ref: str, regions: list[tuple[str, str]]) -> None:
         """Select a task; move to In Progress; place edit bars.
 
         task_ref: either a note_id (reads from dashboard) or an issue number
@@ -406,7 +406,7 @@ class PaperAuthoring(Workflow):
             except Exception:
                 pass
 
-    def select_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
+    def begin_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
         if not regions:
             raise ValueError("At least one edit region required")
@@ -452,7 +452,7 @@ class PaperAuthoring(Workflow):
         self._pop_state(validate=False)
         self.assert_valid()
 
-    def complete_task(self) -> None:
+    def end_task(self) -> None:
         """Complete the current task or subtask."""
         stack = self._read_stack()
 
@@ -538,7 +538,7 @@ class PaperAuthoring(Workflow):
         frame["subtasks"] = subtasks
         self._save_stack(sf["stack"], history=sf["history"])
 
-    def select_subtask(self, subtask_id: str, regions: list[tuple[str, str]]) -> None:
+    def begin_subtask(self, subtask_id: str, regions: list[tuple[str, str]]) -> None:
         """Select a subtask; remove parent bars, place subtask bars, push state."""
         if not regions:
             raise ValueError("At least one edit region required")
@@ -636,7 +636,7 @@ class PaperAuthoring(Workflow):
     def _require_active_task(self) -> None:
         phase = self._read_phase()
         if phase is Phase.IDLE:
-            raise ValueError(f"No active task. Use {CMD_SELECT_TASK} or {CMD_SELECT_AD_HOC} first.")
+            raise ValueError(f"No active task. Use {CMD_BEGIN_TASK} or {CMD_BEGIN_AD_HOC} first.")
 
 
     def _place_bars(self, file_path: str, passage: str,
@@ -699,8 +699,8 @@ class PaperAuthoring(Workflow):
         # Phase-based blocks
         if phase is Phase.IDLE:
             return False, (
-                f"No active task. Use `workflow.py {CMD_SELECT_TASK}` or "
-                f"`workflow.py {CMD_SELECT_AD_HOC}` first."
+                f"No active task. Use `workflow.py {CMD_BEGIN_TASK}` or "
+                f"`workflow.py {CMD_BEGIN_AD_HOC}` first."
             )
         if phase is Phase.TRIAGE:
             return False, (
@@ -954,20 +954,20 @@ def main() -> None:
     elif command == CMD_APPROVE_TRIAGE:
         pa.approve_triage()
         print("Triage complete; entering idle")
-    elif command == CMD_SELECT_TASK:
+    elif command == CMD_BEGIN_TASK:
         if len(sys.argv) < 4:
-            print(f"Usage: workflow.py {CMD_SELECT_TASK} <note-id> <regions-json>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_BEGIN_TASK} <note-id> <regions-json>", file=sys.stderr)
             print(f"  regions-json: [[\"file\", \"passage\"], ...]", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[3])
-        pa.select_task(sys.argv[2], [(r[0], r[1]) for r in regions])
+        pa.begin_task(sys.argv[2], [(r[0], r[1]) for r in regions])
         print(f"Selected task: {sys.argv[2]} ({len(regions)} region(s))")
-    elif command == CMD_SELECT_AD_HOC:
+    elif command == CMD_BEGIN_AD_HOC:
         if len(sys.argv) < 3:
-            print(f"Usage: workflow.py {CMD_SELECT_AD_HOC} <regions-json>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_BEGIN_AD_HOC} <regions-json>", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[2])
-        pa.select_ad_hoc([(r[0], r[1]) for r in regions])
+        pa.begin_ad_hoc([(r[0], r[1]) for r in regions])
         print(f"Ad hoc edit started ({len(regions)} region(s))")
     elif command == CMD_CREATE_PLAN:
         if len(sys.argv) < 3:
@@ -984,15 +984,15 @@ def main() -> None:
             sys.exit(1)
         pa.add_subtask(sys.argv[2], sys.argv[3])
         print(f"Added subtask: {sys.argv[2]}")
-    elif command == CMD_SELECT_SUBTASK:
+    elif command == CMD_BEGIN_SUBTASK:
         if len(sys.argv) < 4:
-            print(f"Usage: workflow.py {CMD_SELECT_SUBTASK} <subtask-id> <regions-json>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_BEGIN_SUBTASK} <subtask-id> <regions-json>", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[3])
-        pa.select_subtask(sys.argv[2], [(r[0], r[1]) for r in regions])
+        pa.begin_subtask(sys.argv[2], [(r[0], r[1]) for r in regions])
         print(f"Selected subtask: {sys.argv[2]} ({len(regions)} region(s))")
-    elif command == CMD_COMPLETE_TASK:
-        pa.complete_task()
+    elif command == CMD_END_TASK:
+        pa.end_task()
         print("Task completed")
     elif command == CMD_OPEN_REVIEW:
         if len(sys.argv) < 4:

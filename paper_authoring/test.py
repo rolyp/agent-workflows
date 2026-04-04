@@ -242,7 +242,7 @@ class CheckEditTest(TestFixture):
         tracker = self._make_tracker()
         allowed, msg = tracker.check_edit("sec/test.tex", None, "\\deleted{text}")
         self.assertFalse(allowed)
-        self.assertIn("select-task", msg)
+        self.assertIn("begin-task", msg)
 
     def test_tex_edit_blocked_without_change_markup(self):
         tracker = self._make_tracker(_make_dashboard(
@@ -451,25 +451,25 @@ class CompleteTaskTest(TestFixture):
         # Add a task with proper note link
         tracker.add_task("test-1", "Fix something", "structural")
         (self.test_dir / "sec" / "test.tex").write_text("some passage\n")
-        tracker.select_task("test-1", [("sec/test.tex", "some passage")])
+        tracker.begin_task("test-1", [("sec/test.tex", "some passage")])
         return tracker
 
     def test_complete_updates_done_count(self):
         tracker = self._make_tracker_with_task()
-        tracker.complete_task()
+        tracker.end_task()
         dashboard = tracker._read_dashboard()
         # structural: was "0 of 3" (2 original + 1 added), now 1 done
         self.assertIn("1 of 3", dashboard)
 
     def test_complete_validates(self):
-        """complete_task should call assert_valid; a broken state should raise."""
+        """end_task should call assert_valid; a broken state should raise."""
         tracker = self._make_tracker_with_task()
         # Corrupt the count before completing
         dashboard = tracker._read_dashboard()
         dashboard = dashboard.replace("0 of 3", "0 of 99")
         tracker.dashboard_path.write_text(dashboard)
         with self.assertRaises(ValidationError):
-            tracker.complete_task()
+            tracker.end_task()
 
 
 class SubtaskTest(TestFixture):
@@ -478,7 +478,7 @@ class SubtaskTest(TestFixture):
         tracker.add_task("test-1", "Big task", "structural")
         (self.test_dir / "sec" / "intro.tex").write_text("intro passage\n")
         (self.test_dir / "sec" / "related.tex").write_text("related passage\n")
-        tracker.select_task("test-1", [
+        tracker.begin_task("test-1", [
             ("sec/intro.tex", "intro passage"),
             ("sec/related.tex", "related passage"),
         ])
@@ -490,18 +490,18 @@ class SubtaskTest(TestFixture):
         dashboard = tracker._read_dashboard()
         self.assertIn("[ ] Fix introduction (subtask: test-1a)", dashboard)
 
-    def test_select_subtask_pushes_state(self):
+    def test_begin_subtask_pushes_state(self):
         tracker = self._make_tracker_with_selected_task()
         tracker.add_subtask("test-1a", "Fix introduction")
-        tracker.select_subtask("test-1a", [("sec/intro.tex", "intro passage")])
+        tracker.begin_subtask("test-1a", [("sec/intro.tex", "intro passage")])
         stack = tracker._read_stack()
         self.assertEqual(len(stack), 2)
         self.assertEqual(stack[-1]["task"], "test-1a")
 
-    def test_select_subtask_replaces_bars(self):
+    def test_begin_subtask_replaces_bars(self):
         tracker = self._make_tracker_with_selected_task()
         tracker.add_subtask("test-1a", "Fix introduction")
-        tracker.select_subtask("test-1a", [("sec/intro.tex", "intro passage")])
+        tracker.begin_subtask("test-1a", [("sec/intro.tex", "intro passage")])
         # Parent bars removed from related.tex
         related = (self.test_dir / "sec" / "related.tex").read_text()
         self.assertNotIn(EDIT_START, related)
@@ -512,8 +512,8 @@ class SubtaskTest(TestFixture):
     def test_complete_subtask_pops_state(self):
         tracker = self._make_tracker_with_selected_task()
         tracker.add_subtask("test-1a", "Fix introduction")
-        tracker.select_subtask("test-1a", [("sec/intro.tex", "intro passage")])
-        tracker.complete_task()
+        tracker.begin_subtask("test-1a", [("sec/intro.tex", "intro passage")])
+        tracker.end_task()
         stack = tracker._read_stack()
         self.assertEqual(len(stack), 1)
         self.assertEqual(stack[-1]["task"], "test-1")
@@ -521,8 +521,8 @@ class SubtaskTest(TestFixture):
     def test_complete_subtask_shows_checked_in_dashboard(self):
         tracker = self._make_tracker_with_selected_task()
         tracker.add_subtask("test-1a", "Fix introduction")
-        tracker.select_subtask("test-1a", [("sec/intro.tex", "intro passage")])
-        tracker.complete_task()
+        tracker.begin_subtask("test-1a", [("sec/intro.tex", "intro passage")])
+        tracker.end_task()
         dashboard = tracker._read_dashboard()
         self.assertIn("[x] Fix introduction", dashboard)
         self.assertNotIn("🔵 Fix introduction", dashboard)
