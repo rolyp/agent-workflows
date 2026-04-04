@@ -48,62 +48,80 @@ Follow whenever working on the agent-workflows submodule. See [dashboard](../das
 
 ## State machine
 
-Enforced by `WorkflowDev` (`workflow.py`) via hooks. State stored in `state.json`.
+Enforced by `WorkflowDev` (`workflow.py`) via hooks. State stored in `state.json` (protected from direct manipulation by hooks).
+
+### Pushdown automaton
+
+The state is a stack. The root frame is the task; steps push frames. Idle = root frame only.
 
 ```
-idle ──start-task──► refactoring (locked)
-                         │
-              expand-coverage / refactor-code (toggle)
-              begin-step / end-step (structured iterations)
-                         │
-                    request-review (tests must pass)
-                         │
-                         ▼
-                      review (all locked, reviewer runs)
-                      │      │
-                  approve    feedback ──► refactoring
-                      │
-                      ▼
-                 refactoring
-                      │
-                 begin-modify <description>
-                      │
-                      ▼
-                 modifying (scoped)
-                  │      │
-  back-to-refactor  request-review (tests must pass)
-          │              │
-          ▼              ▼
-     refactoring      review ──approve──► idle
-                         │
-                      feedback ──► refactoring
+no task ──begin-task──► idle (root frame, edits locked)
+                            │
+               begin-step <desc> <code|test|modify>
+                            │
+                            ▼
+                        step (edits gated by mode)
+                         │      │       │
+              begin-step │   end-step   abort-step
+              (nesting)  │   (tests     (no tests,
+                         ▼    must       rolls back)
+                       step   pass)
+                         │      │
+                         ▼      ▼
+                      (pop to parent frame)
+                            │
+                   ─────────┘
+                   │
+              (at root = idle)
+                   │
+              request-review (tests + CI must pass)
+                   │
+                   ▼
+              review (all locked)
+               │          │
+       respond-review/  respond-review/
+         approve        feedback [items...]
+               │          │
+               ▼          ▼
+              idle        idle (items added as todos)
+                   │
+              end-task (requires reviewed_sha = HEAD)
+                   │
+                   ▼
+              no task (issue closed)
 ```
 
-### States
+### Step modes
 
-| State | Test files | Code files | Description |
-|-------|-----------|------------|-------------|
-| `idle` | Locked | Locked | No active task |
-| `refactoring` (no mode) | Locked | Locked | Must choose sub-mode |
-| `refactoring` (`expand-coverage`) | Editable | Locked | Writing behaviour-preservation witnesses |
-| `refactoring` (`refactor-code`) | Locked | Editable | Restructuring without behaviour change |
-| `modifying` | Editable | Editable | Making behaviour-changing edits |
-| `review` | Locked | Locked | **Code Reviewer** examining work |
+Each `begin-step` specifies a mode that gates file access:
+
+| Mode | Label | Emoji | Test files | Code files |
+|------|-------|-------|-----------|------------|
+| `code` | 🟢 refactor/code | 🟢 | Locked | Editable |
+| `test` | 🟢 refactor/test | 🟢 | Editable | Locked |
+| `modify` | 🟠 modify | 🟠 | Editable | Editable |
+
+Idle (no step active): all edits locked. Review: all edits locked.
 
 ### Commands
 
-| Command | From | To | Gate |
-|---------|------|----|------|
-| `start-task <name>` | idle | refactoring | — |
-| `expand-coverage` | refactoring | refactoring (expand-coverage) | — |
-| `refactor-code` | refactoring | refactoring (refactor-code) | — |
-| `begin-step <name>` | refactoring | refactoring (nested frame) | No step already in progress |
-| `end-step` | refactoring (nested) | refactoring (pop frame) | Tests must pass |
-| `request-review` | refactoring or modifying | review | Tests must pass; no step in progress |
-| `approve` | review | refactoring (if reviewing refactoring) or idle (if reviewing modifying) | — |
-| `feedback` | review | refactoring (locked) | — |
-| `begin-modify <desc>` | refactoring | modifying (scoped) | — |
-| `back-to-refactor` | modifying | refactoring (locked) | — |
+| Command | Effect | Gate |
+|---------|--------|------|
+| `begin-task <name> [issue#]` | Set root frame; issue → In Progress | No active task |
+| `begin-step <desc> <code\|test\|modify>` | Push step frame | Not in failed state |
+| `end-step` | Pop frame; check off todo with commit link | Tests must pass |
+| `abort-step` | Pop frame without tests; todo left unchecked | — |
+| `request-review` | Enter review | Idle (root frame); tests + CI pass |
+| `respond-review/approve` | Return to idle | In review |
+| `respond-review/feedback [items...]` | Return to idle; add todos | In review |
+| `end-task` | Close issue; return to no task | Idle; reviewed_sha = HEAD |
+
+### Failure handling
+
+When `end-step` fails (tests don't pass):
+- Step frame stays on stack with `end_step_failed` flag
+- `begin-step` blocked until either tests pass (`end-step` retry) or step is aborted (`abort-step`)
+- Prevents masking a behaviour change as a refactoring
 
 ---
 
@@ -111,41 +129,37 @@ idle ──start-task──► refactoring (locked)
 
 ### Task selection
 - **Developer** names an issue directly, or **Dev Assistant** proposes one from open issues
-- On approval: create a working branch; `start-task`
+- On approval: `begin-task <name> <issue-number>`
 
-### Refactoring
-- Iterative: decompose into small steps, commit after each
-- Toggle between `expand-coverage` (tests) and `refactor-code` (code)
-- Natural rhythm: write tests first, then refactor
-- Adding new backwards-compatible behaviour is refactoring (new commands, new code paths, new functions — as long as existing tests pass unchanged). Only changes that alter existing behaviour require the modifying phase
-- When refactoring is complete: `request-review` (runs tests, then **Code Reviewer** must approve before modifying)
+### Working
+- Decompose into steps: `begin-step <description> <code|test|modify>`
+- Steps can nest (decomposition within a step)
+- Adding backwards-compatible behaviour is refactoring (mode `code` or `test`); changing existing behaviour requires mode `modify`
+- Commit after each step; `end-step` runs `test.sh` (mypy + pytest) and pops
 
 ### Bug fixes
-- A bug is an existing behaviour; capturing it in a test is refactoring
-- Write the test asserting **correct** behaviour; decorate with `@unittest.expectedFailure`
-- Tests pass (expected failure counts as OK); transition to modifying
-- Fix the code and remove the decorator — test now passes normally
-
-### Modifying
-- Enter via `begin-modify <description>` with explicit scope
-- Make behaviour-changing edits (code + tests together)
-- May cycle back via `back-to-refactor` for further preparation
-- Multiple refactor→modify cycles allowed per task
-- When complete: `request-review` (runs tests, then **Code Reviewer** must approve before task closes)
+- A bug is existing behaviour; capturing it in a test is refactoring
+- Write test asserting **correct** behaviour; decorate with `@unittest.expectedFailure`
+- Tests pass (expected failure counts as OK)
+- Fix with `begin-step <desc> modify`; remove decorator
 
 ### Review
-- **Code Reviewer** examines work for consolidation, code smells, fragile implementations
-- Mandatory at both transitions: refactoring→modifying and modifying→idle
-- `approve` → modifying (post-refactoring) or idle (post-modifying)
-- `feedback` → always back to refactoring (fixes are refactoring by definition)
-- `request-review` output reminds **Dev Assistant** to invoke `/code-review`
+- `request-review` from idle; **Code Reviewer** examines work
+- `respond-review/approve` returns to idle; `respond-review/feedback` returns with new todos
+- Mandatory before `end-task`; `reviewed_sha` must match HEAD
+
+### GitHub integration
+- Issue labels track current mode: ⚪ idle, 🟢 refactor/code, 🟢 refactor/test, 🟠 modify, 🟡 review
+- Issue body todos track steps: 🟢/🟠 emoji for active, checked with commit link when complete
+- Project status: Planned → In Progress → Done
+- Milestone: exactly one open milestone required
 
 ---
 
 ## Design notes
 
-- `GH_TOKEN` in `.claude/settings.local.json` provides GitHub API access (same pattern as host repo)
-- `gh` CLI for all GitHub operations (issues, PRs)
-- Issue body contains full specification; code is the implementation
-- Hooks (`pre_edit.py`, `pre_write.py`) consult `WorkflowDev` state to gate file operations
-- SessionStart hook reports current phase on startup
+- `GH_TOKEN` / `GH_PROJECT_TOKEN` in `.claude/settings.local.json` (gitignored)
+- Hooks gate all tool calls: `pre_edit.py`, `pre_write.py`, `pre_bash.py` (protects state.json)
+- `prepare-commit-msg` git hook auto-tags commits with current mode (e.g. `[refactor/code]`)
+- `post_push.py` records CI run ID; `request-review` blocks until CI passes
+- `state.json` is the local pushdown automaton; GitHub labels + project status are the external view
