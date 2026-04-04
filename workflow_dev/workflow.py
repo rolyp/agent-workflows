@@ -42,6 +42,7 @@ CMD_BEGIN_TASK = "begin-task"
 CMD_END_TASK = "end-task"
 CMD_BEGIN_STEP = "begin-step"
 CMD_END_STEP = "end-step"
+CMD_ABORT_STEP = "abort-step"
 CMD_REQUEST_REVIEW = "request-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
@@ -186,6 +187,11 @@ class WorkflowDev(Workflow):
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"begin-step not available in {phase.value}")
         state = self.read_state()
+        if state.get("end_step_failed"):
+            raise ValueError(
+                "end-step failed on the current step. "
+                "Fix the code and retry end-step, or use abort-step to roll back."
+            )
         step_mode = StepMode(mode)
         # Map mode to Phase for the pushed frame
         frame_phase = Phase.MODIFYING if step_mode is StepMode.MODIFY else Phase.REFACTORING
@@ -214,7 +220,13 @@ class WorkflowDev(Workflow):
         stack = self._read_stack()
         if len(stack) <= 1:
             raise ValueError("Cannot pop root frame.")
-        self._run_tests()
+        try:
+            self._run_tests()
+        except (RuntimeError, FileNotFoundError):
+            # Mark step as failed — blocks begin-step until fixed
+            stack[-1]["end_step_failed"] = True
+            self._save_stack(stack)
+            raise
         self._pop_state()
         issue_url = self._issue_url_from_state()
         if issue_url and step_name:
@@ -223,6 +235,16 @@ class WorkflowDev(Workflow):
                 capture_output=True, text=True, cwd=self.root,
             ).stdout.strip()
             self.complete_issue_todo(issue_url, step_name, commit_sha=head_sha)
+
+    def abort_step(self) -> None:
+        """Abort the current step. Pops without running tests. Does NOT check off todo."""
+        state = self.read_state()
+        if not state.get("step"):
+            raise ValueError("No step in progress.")
+        stack = self._read_stack()
+        if len(stack) <= 1:
+            raise ValueError("Cannot pop root frame.")
+        self._pop_state()
 
     def request_review(self) -> None:
         """Request code review. Only from idle (root frame, no mode)."""
@@ -449,6 +471,9 @@ def main() -> None:
     elif command == CMD_END_STEP:
         wd.end_step()
         print("Step complete; back to idle")
+    elif command == CMD_ABORT_STEP:
+        wd.abort_step()
+        print("Step aborted; back to idle")
     elif command == CMD_REQUEST_REVIEW:
         wd.request_review()
         print("Review requested; edits blocked. Invoke /code-review now.")

@@ -168,6 +168,43 @@ class StateTransitionTest(TestFixture):
         with self.assertRaises(ValueError):
             wd.end_step()
 
+    def test_end_step_failure_blocks_begin_step(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        # Make test.sh fail
+        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
+        with self.assertRaises(RuntimeError):
+            wd.end_step()
+        # Now begin-step should be blocked
+        # Restore test.sh first so it doesn't interfere
+        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 0\n")
+        with self.assertRaises(ValueError) as ctx:
+            wd.begin_step("Dodge", "test")
+        self.assertIn("end-step failed", str(ctx.exception))
+
+    def test_end_step_retry_after_fix(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        # Fail first
+        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
+        with self.assertRaises(RuntimeError):
+            wd.end_step()
+        # Fix and retry
+        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 0\n")
+        wd.end_step()  # should succeed now
+        self.assertNotIn("step", wd.read_state())
+
+    def test_abort_step_pops_without_tests(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Work", "code")
+        # Make test.sh fail — abort should still work
+        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
+        wd.abort_step()  # no tests run
+        self.assertNotIn("step", wd.read_state())
+
     def test_invalid_transitions(self):
         wd = self._make_wd()
         with self.assertRaises(ValueError):
