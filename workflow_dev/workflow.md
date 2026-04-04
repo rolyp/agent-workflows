@@ -120,11 +120,11 @@ idle ──start-task──► refactoring (locked)
 - Adding new backwards-compatible behaviour is refactoring (new commands, new code paths, new functions — as long as existing tests pass unchanged). Only changes that alter existing behaviour require the modifying phase
 - When refactoring is complete: `request-review` (runs tests, then **Code Reviewer** must approve before modifying)
 
-### Test-first pattern (`@expectedFailure`)
-- Write a test asserting **desired** behaviour during refactoring (additive — doesn't change existing behaviour)
-- Decorate with `@unittest.expectedFailure`; tests pass
-- In modifying phase, implement the feature or fix the bug; remove the decorator
-- Applies to both bug fixes (test describes correct behaviour) and new features (TDD)
+### Bug fixes
+- A bug is an existing behaviour; capturing it in a test is refactoring
+- Write the test asserting **correct** behaviour; decorate with `@unittest.expectedFailure`
+- Tests pass (expected failure counts as OK); transition to modifying
+- Fix the code and remove the decorator — test now passes normally
 
 ### Modifying
 - Enter via `begin-modify <description>` with explicit scope
