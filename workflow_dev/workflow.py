@@ -137,9 +137,10 @@ class WorkflowDev(Workflow):
         )
         self.dashboard_path.write_text(dashboard)
 
-    def _save_stack(self, stack: list[dict], validate: bool = True) -> None:
+    def _save_stack(self, stack: list[dict], history: list[dict] | None = None,
+                    validate: bool = True) -> None:
         """Write stack and update dashboard."""
-        super()._save_stack(stack, validate=validate)
+        super()._save_stack(stack, history=history, validate=validate)
         self._update_dashboard()
 
     # --- Commands ---
@@ -207,52 +208,87 @@ class WorkflowDev(Workflow):
         self._push_state(frame_phase, state.get("task"),
                          step=tagged, mode=mode)
         self._set_label(label_map[step_mode])
-        issue_url = self._issue_url_from_state()
-        if issue_url:
-            self.activate_issue_todo(issue_url, tagged, mode)
+        self._render_issue_todos()
 
     def end_step(self) -> None:
-        """Pop the current step. Runs tests first. Checks off todo with commit link."""
+        """Pop the current step. Runs tests first. Records result in history."""
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
             raise ValueError("No step in progress.")
-        stack = self._read_stack()
-        if len(stack) <= 1:
+        sf = self._read_state_file()
+        if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
         try:
             self._run_tests()
         except (RuntimeError, FileNotFoundError):
             # Mark step as failed — blocks begin-step until fixed
-            stack[-1]["end_step_failed"] = True
-            self._save_stack(stack)
-            # Record failure in issue body
-            issue_url = self._issue_url_from_state()
-            if issue_url and step_name:
-                self.fail_issue_todo(issue_url, step_name)
+            sf["stack"][-1]["end_step_failed"] = True
+            sf["history"].append({"step": step_name, "status": "failed"})
+            self._save_stack(sf["stack"], history=sf["history"])
+            self._render_issue_todos()
             raise
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=self.root,
+        ).stdout.strip()
         self._pop_state()
-        issue_url = self._issue_url_from_state()
-        if issue_url and step_name:
-            head_sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True, cwd=self.root,
-            ).stdout.strip()
-            self.complete_issue_todo(issue_url, step_name, commit_sha=head_sha)
+        self._append_history({"step": step_name, "status": "completed", "commit": head_sha})
+        self._render_issue_todos()
 
     def abort_step(self) -> None:
-        """Abort the current step. Pops without running tests. Marks todo as aborted."""
+        """Abort the current step. Pops without running tests. Records in history."""
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
             raise ValueError("No step in progress.")
-        stack = self._read_stack()
-        if len(stack) <= 1:
+        sf = self._read_state_file()
+        if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
         self._pop_state()
+        self._append_history({"step": step_name, "status": "aborted"})
+        self._render_issue_todos()
+
+    def _render_issue_todos(self) -> None:
+        """Re-render the issue body's todo section from history + stack."""
         issue_url = self._issue_url_from_state()
-        if issue_url and step_name:
-            self.abort_issue_todo(issue_url, step_name)
+        if not issue_url:
+            return
+        sf = self._read_state_file()
+        repo = self.get_repo()
+        lines = []
+        # Render history
+        for entry in sf["history"]:
+            step = entry["step"]
+            status = entry["status"]
+            if status == "completed":
+                sha = entry.get("commit", "")
+                if sha:
+                    lines.append(f"- [x] {step} ([{sha[:7]}](https://github.com/{repo}/commit/{sha}))")
+                else:
+                    lines.append(f"- [x] {step}")
+            elif status == "failed":
+                lines.append(f"- [x] \u274c {step} (failed)")
+            elif status == "aborted":
+                lines.append(f"- [x] \u26d4 {step} (aborted)")
+        # Render active step from stack (if any)
+        for frame in sf["stack"][1:]:  # skip root frame
+            step = frame.get("step")
+            mode = frame.get("mode", "")
+            if step:
+                emoji = self.MODE_EMOJI.get(mode, "\u26aa")
+                lines.append(f"- [ ] {emoji} {step}")
+        # Read existing body, find the step section, replace it
+        body = self._read_issue_body(issue_url)
+        # Split at the step section marker or append
+        marker = "<!-- steps -->"
+        if marker in body:
+            before = body[:body.index(marker) + len(marker)]
+            rendered = before + "\n" + "\n".join(lines) + "\n"
+        else:
+            # No marker — append after a blank line
+            rendered = body.rstrip() + f"\n\n{marker}\n" + "\n".join(lines) + "\n"
+        self._write_issue_body(issue_url, rendered)
 
     def request_review(self) -> None:
         """Request code review. Only from idle (root frame, no mode)."""

@@ -24,14 +24,33 @@ class Workflow(ABC):
     root: Path
     state_path: Path
 
-    # --- State (pushdown automaton: stack of {phase, task, ...} frames) ---
+    # --- State (pushdown automaton with history) ---
+    #
+    # State file format:
+    #   {"stack": [...frames...], "history": [...entries...]}
+    # Legacy format (list of frames) is auto-migrated on read.
+
+    def _read_state_file(self) -> dict:
+        """Read the full state file, auto-migrating legacy format."""
+        raw = json.loads(self.state_path.read_text())
+        if isinstance(raw, list):
+            # Legacy format: bare stack list → migrate
+            return {"stack": raw, "history": []}
+        return raw
+
+    def _write_state_file(self, state_file: dict) -> None:
+        """Write the full state file."""
+        self.state_path.write_text(json.dumps(state_file, indent=2) + "\n")
 
     def read_state(self) -> dict:
         """Read the top frame of the state stack."""
         return self._read_stack()[-1]
 
     def _read_stack(self) -> list[dict]:
-        return json.loads(self.state_path.read_text())
+        return self._read_state_file()["stack"]
+
+    def _read_history(self) -> list[dict]:
+        return self._read_state_file()["history"]
 
     def _read_phase(self) -> Enum:
         """Read the current phase. Subclasses should narrow the return type."""
@@ -40,43 +59,51 @@ class Workflow(ABC):
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
         """Replace the top frame of the state stack."""
-        stack = self._read_stack()
+        sf = self._read_state_file()
         frame: dict[str, object] = {"phase": phase.value, "task": task}
         frame.update(extra)
-        stack[-1] = frame
-        self._save_stack(stack)
+        sf["stack"][-1] = frame
+        self._save_stack(sf["stack"], history=sf["history"])
 
     def _push_state(self, phase: Enum, task: str | None = None,
                     **extra: object) -> None:
         """Push a new frame onto the state stack."""
-        stack = self._read_stack()
+        sf = self._read_state_file()
         frame: dict[str, object] = {"phase": phase.value, "task": task}
         frame.update(extra)
-        stack.append(frame)
-        self._save_stack(stack)
+        sf["stack"].append(frame)
+        self._save_stack(sf["stack"], history=sf["history"])
 
     def _pop_state(self, validate: bool = True) -> dict[str, object]:
         """Pop the top frame and return it."""
-        stack = self._read_stack()
-        if len(stack) <= 1:
+        sf = self._read_state_file()
+        if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop the last state frame")
-        popped = stack.pop()
-        self._save_stack(stack, validate=validate)
+        popped = sf["stack"].pop()
+        self._save_stack(sf["stack"], history=sf["history"], validate=validate)
         return popped
 
-    def _save_stack(self, stack: list[dict], validate: bool = True) -> None:
-        """Write the stack to disk. Subclasses may override to add side effects.
+    def _append_history(self, entry: dict) -> None:
+        """Append an entry to the history log."""
+        sf = self._read_state_file()
+        sf["history"].append(entry)
+        self._save_stack(sf["stack"], history=sf["history"])
+
+    def _save_stack(self, stack: list[dict], history: list[dict] | None = None,
+                    validate: bool = True) -> None:
+        """Write the state file. Subclasses may override to add side effects.
 
         validate: no-op in base; subclasses (e.g. PaperAuthoring) use it to
         skip validation when the caller will validate after further changes.
         """
-        self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+        sf = {"stack": stack, "history": history if history is not None else []}
+        self._write_state_file(sf)
 
     def _init_state(self, idle_phase: Enum) -> None:
-        """Initialise state file if absent, with a single idle frame."""
+        """Initialise state file if absent."""
         if not self.state_path.exists():
-            stack = [{"phase": idle_phase.value, "task": None}]
-            self.state_path.write_text(json.dumps(stack, indent=2) + "\n")
+            sf = {"stack": [{"phase": idle_phase.value, "task": None}], "history": []}
+            self._write_state_file(sf)
 
     # --- Path resolution ---
 

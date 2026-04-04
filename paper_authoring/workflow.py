@@ -192,9 +192,10 @@ class PaperAuthoring(Workflow):
             extra["regions"] = self._normalize_regions(extra["regions"])
         super()._push_state(phase, task, **extra)
 
-    def _save_stack(self, stack: list[dict], validate: bool = True) -> None:
+    def _save_stack(self, stack: list[dict], history: list[dict] | None = None,
+                    validate: bool = True) -> None:
         """Write stack, update dashboard, optionally validate."""
-        super()._save_stack(stack, validate=validate)
+        super()._save_stack(stack, history=history, validate=validate)
         self._update_in_progress()
         if validate:
             self.assert_valid()
