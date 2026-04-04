@@ -215,12 +215,13 @@ class WorkflowDev(Workflow):
         if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
         self._run_tests()  # raises on failure — step stays on stack
-        head_sha = subprocess.run(
+        # Use last_commit from frame (set by post-commit hook), falling back to HEAD
+        commit_sha = state.get("last_commit") or subprocess.run(
             ["git", "rev-parse", "HEAD"],
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
         self._pop_state()
-        self._append_history({"step": step_name, "status": "completed", "commit": head_sha})
+        self._append_history({"step": step_name, "status": "completed", "commit": commit_sha})
         self._render_issue_todos()
 
     def abort_step(self, reason: str = "") -> None:

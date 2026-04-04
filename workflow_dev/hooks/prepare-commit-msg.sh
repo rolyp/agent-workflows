@@ -23,15 +23,16 @@ fi
 # Extract mode from top frame; derive tag
 TAG=$(python3 -c "
 import json, sys
-stack = json.loads(open('$STATE_FILE').read())
+raw = json.loads(open('$STATE_FILE').read())
+stack = raw.get('stack', raw) if isinstance(raw, dict) else raw
 state = stack[-1]
 mode = state.get('mode', '')
 phase = state.get('phase', '')
-if mode == 'refactor-code':
+if mode == 'code':
     print('[refactor/code]')
-elif mode == 'expand-coverage':
+elif mode == 'test':
     print('[refactor/test]')
-elif phase == 'modifying':
+elif mode == 'modify' or phase == 'modifying':
     print('[modify]')
 elif phase == 'review':
     print('[review]')
