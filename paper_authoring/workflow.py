@@ -442,7 +442,21 @@ class PaperAuthoring(Workflow):
 
         if len(stack) > 1:
             completed_task = self.read_state().get("task")
+            subtask_url = self.read_state().get("issue_url")
             self._pop_state(validate=False)
+            # Close sub-issue if linked
+            if subtask_url:
+                try:
+                    self.set_issue_status(subtask_url, "Done")
+                    self.clear_issue_labels(subtask_url)
+                    env = self._gh_env()
+                    number = self._get_issue_number(subtask_url)
+                    subprocess.run(
+                        ["gh", "issue", "close", number, "--repo", self.get_repo()],
+                        capture_output=True, text=True, env=env,
+                    )
+                except Exception:
+                    pass
             # Mark subtask as completed in parent's list
             parent_stack = self._read_stack()
             for st in parent_stack[-1].get("subtasks", []):
@@ -493,25 +507,53 @@ class PaperAuthoring(Workflow):
     # --- Subtasks ---
 
     def add_subtask(self, subtask_id: str, description: str) -> None:
-        """Add a subtask under the current in-progress task."""
-        stack = self._read_stack()
-        frame = stack[-1]
+        """Add a subtask under the current in-progress task.
+
+        Creates a GitHub sub-issue if the parent task has an issue URL.
+        """
+        state = self.read_state()
+        parent_url = state.get("issue_url")
+        sf = self._read_state_file()
+        frame = sf["stack"][-1]
+        subtask_entry: dict[str, object] = {"id": subtask_id, "description": description}
+        # Create GitHub sub-issue if parent has one
+        if parent_url:
+            try:
+                sub_url = self.create_sub_issue(parent_url, description)
+                subtask_entry["issue_url"] = sub_url
+            except Exception:
+                pass  # best-effort
         subtasks = list(frame.get("subtasks", []))
-        subtasks.append({"id": subtask_id, "description": description})
+        subtasks.append(subtask_entry)
         frame["subtasks"] = subtasks
-        self._save_stack(stack)
+        self._save_stack(sf["stack"], history=sf["history"])
 
     def select_subtask(self, subtask_id: str, regions: list[tuple[str, str]]) -> None:
         """Select a subtask; remove parent bars, place subtask bars, push state."""
         if not regions:
             raise ValueError("At least one edit region required")
+        # Find subtask entry to get issue_url
+        state = self.read_state()
+        subtask_url = None
+        for st in state.get("subtasks", []):
+            if st.get("id") == subtask_id:
+                subtask_url = st.get("issue_url")
+                break
         for path in (self._tex_files_containing(EDIT_START)
                      + self._tex_files_containing(REVIEW_START)):
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
         for file_path, passage in regions:
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
-        self._push_state(Phase.EDIT, subtask_id, regions=regions)
+        self._push_state(Phase.EDIT, subtask_id, regions=regions,
+                         issue_url=subtask_url)
+        # Set sub-issue to In Progress
+        if subtask_url:
+            try:
+                self.set_issue_status(subtask_url, "In Progress")
+                self.set_issue_label(subtask_url, self.LABEL_EDIT)
+            except Exception:
+                pass
 
 
     # --- Bar operations (require active task) ---
