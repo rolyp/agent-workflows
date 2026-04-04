@@ -170,7 +170,7 @@ class StateTransitionTest(TestFixture):
         with self.assertRaises(ValueError):
             wd.end_step()
 
-    def test_end_step_failure_blocks_begin_step(self):
+    def test_end_step_failure_keeps_step_on_stack(self):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_step("Work", "code")
@@ -178,12 +178,8 @@ class StateTransitionTest(TestFixture):
         (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         with self.assertRaises(RuntimeError):
             wd.end_step()
-        # Now begin-step should be blocked
-        # Restore test.sh first so it doesn't interfere
-        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 0\n")
-        with self.assertRaises(ValueError) as ctx:
-            wd.begin_step("Dodge", "test")
-        self.assertIn("end-step failed", str(ctx.exception))
+        # Step should still be on stack
+        self.assertEqual(wd.read_state().get("step"), "[refactor/code] Work")
 
     def test_end_step_retry_after_fix(self):
         wd = self._make_wd()
@@ -206,6 +202,55 @@ class StateTransitionTest(TestFixture):
         (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         wd.abort_step()  # no tests run
         self.assertNotIn("step", wd.read_state())
+
+    def test_completed_step_in_history(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Fix imports", "code")
+        wd.end_step()
+        history = wd._read_history()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["step"], "[refactor/code] Fix imports")
+        self.assertEqual(history[0]["status"], "completed")
+        self.assertIn("commit", history[0])
+
+    def test_failed_end_step_no_history_entry(self):
+        """Failed end-step doesn't record in history (step stays on stack)."""
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Bad change", "code")
+        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
+        with self.assertRaises(RuntimeError):
+            wd.end_step()
+        history = wd._read_history()
+        self.assertEqual(len(history), 0)
+
+    def test_aborted_step_in_history(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Wrong approach", "code")
+        wd.abort_step()
+        history = wd._read_history()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["status"], "aborted")
+
+    def test_history_accumulates(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_step("Step 1", "code")
+        wd.end_step()
+        wd.begin_step("Step 2", "test")
+        wd.end_step()
+        history = wd._read_history()
+        self.assertEqual(len(history), 2)
+
+    def test_legacy_format_auto_migrates(self):
+        """Old flat-list state.json should be readable."""
+        state_path = self.test_dir / "state.json"
+        state_path.write_text(json.dumps([{"phase": "refactoring", "task": "old-task"}]))
+        wd = self._make_wd()
+        self.assertEqual(wd.read_state()["task"], "old-task")
+        self.assertEqual(wd._read_history(), [])
 
     def test_invalid_transitions(self):
         wd = self._make_wd()
@@ -373,14 +418,6 @@ class TodoMarkingTest(unittest.TestCase):
         self.assertIn("abc1234", self.body)
         self.assertNotIn("- [ ]", self.body)
 
-    def test_fail_marks_with_cross(self):
-        wd = self._make_workflow()
-        self.body = "- [ ] 🟢 [refactor/code] Fix thing"
-        wd.fail_issue_todo("url", "[refactor/code] Fix thing")
-        self.assertIn("❌", self.body)
-        self.assertIn("(failed)", self.body)
-        self.assertNotIn("- [ ]", self.body)
-
     def test_abort_marks_with_stop(self):
         wd = self._make_workflow()
         self.body = "- [ ] 🟠 [modify] Add feature"
@@ -388,17 +425,6 @@ class TodoMarkingTest(unittest.TestCase):
         self.assertIn("⛔", self.body)
         self.assertIn("(aborted)", self.body)
         self.assertNotIn("- [ ]", self.body)
-
-    def test_complete_after_fail_replaces_failed_entry(self):
-        wd = self._make_workflow()
-        self.body = "- [x] ❌ [refactor/code] Fix thing (failed)"
-        wd._get_issue_number = lambda url: "1"
-        wd.get_repo = lambda: "owner/repo"
-        wd.complete_issue_todo("url", "[refactor/code] Fix thing", "abc1234def")
-        self.assertIn("- [x]", self.body)
-        self.assertIn("abc1234", self.body)
-        self.assertNotIn("❌", self.body)
-
 
 if __name__ == "__main__":
     unittest.main()

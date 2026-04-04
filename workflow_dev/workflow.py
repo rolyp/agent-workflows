@@ -188,11 +188,6 @@ class WorkflowDev(Workflow):
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"begin-step not available in {phase.value}")
         state = self.read_state()
-        if state.get("end_step_failed"):
-            raise ValueError(
-                "end-step failed on the current step. "
-                "Fix the code and retry end-step, or use abort-step to roll back."
-            )
         step_mode = StepMode(mode)
         # Map mode to Phase for the pushed frame
         frame_phase = Phase.MODIFYING if step_mode is StepMode.MODIFY else Phase.REFACTORING
@@ -211,7 +206,7 @@ class WorkflowDev(Workflow):
         self._render_issue_todos()
 
     def end_step(self) -> None:
-        """Pop the current step. Runs tests first. Records result in history."""
+        """Pop the current step. Runs tests first. Records in history on success."""
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
@@ -219,15 +214,7 @@ class WorkflowDev(Workflow):
         sf = self._read_state_file()
         if len(sf["stack"]) <= 1:
             raise ValueError("Cannot pop root frame.")
-        try:
-            self._run_tests()
-        except (RuntimeError, FileNotFoundError):
-            # Mark step as failed — blocks begin-step until fixed
-            sf["stack"][-1]["end_step_failed"] = True
-            sf["history"].append({"step": step_name, "status": "failed"})
-            self._save_stack(sf["stack"], history=sf["history"])
-            self._render_issue_todos()
-            raise
+        self._run_tests()  # raises on failure — step stays on stack
         head_sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             capture_output=True, text=True, cwd=self.root,
@@ -267,8 +254,6 @@ class WorkflowDev(Workflow):
                     lines.append(f"- [x] {step} ([{sha[:7]}](https://github.com/{repo}/commit/{sha}))")
                 else:
                     lines.append(f"- [x] {step}")
-            elif status == "failed":
-                lines.append(f"- [x] \u274c {step} (failed)")
             elif status == "aborted":
                 lines.append(f"- [x] \u26d4 {step} (aborted)")
         # Render active step from stack (if any)

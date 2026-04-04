@@ -460,17 +460,6 @@ class Workflow(ABC):
                 return
         raise RuntimeError(f"Todo item not found in issue: {item}")
 
-    def fail_issue_todo(self, issue_url: str, item: str) -> None:
-        """Mark a todo as failed. Leaves it visible in the issue body as history."""
-        body = self._read_issue_body(issue_url)
-        failed = f"- [x] \u274c {item} (failed)"  # ❌
-        for line in body.split("\n"):
-            if item in line and ("- [ ] " in line or "\u274c" in line):
-                body = body.replace(line, failed, 1)
-                self._write_issue_body(issue_url, body)
-                return
-        raise RuntimeError(f"Todo item not found in issue: {item}")
-
     def abort_issue_todo(self, issue_url: str, item: str) -> None:
         """Mark a todo as aborted. Leaves it visible in the issue body as history."""
         body = self._read_issue_body(issue_url)
