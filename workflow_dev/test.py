@@ -28,9 +28,13 @@ class TestFixture(unittest.TestCase):
         test_sh = self.test_dir / "test.sh"
         test_sh.write_text("#!/bin/bash\nexit 0\n")
         test_sh.chmod(0o755)
-        # Init git repo
+        # Init git repo (with user config for CI environments)
         import subprocess
         subprocess.run(["git", "init"], capture_output=True, cwd=self.test_dir)
+        subprocess.run(["git", "config", "user.email", "test@test.com"],
+                       capture_output=True, cwd=self.test_dir)
+        subprocess.run(["git", "config", "user.name", "Test"],
+                       capture_output=True, cwd=self.test_dir)
         # Create WorkflowDev (writes state.json)
         wd = WorkflowDev(self.test_dir)
         # Commit everything (test.sh + state.json) for clean-tree check
