@@ -21,6 +21,8 @@ READ_ONLY = (
     "python3 -m pytest",
     "gh issue view",
     "gh pr view",
+    "gh run view",
+    "gh run list",
 )
 
 # Workflow commands (always allowed)
