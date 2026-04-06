@@ -19,6 +19,8 @@ READ_ONLY = (
     "cat ", "head ", "tail ", "ls", "wc ", "find ",
     "grep ", "rg ", "echo ",
     "python3 -m pytest",
+    "gh issue view",
+    "gh pr view",
 )
 
 # Workflow commands (always allowed)
