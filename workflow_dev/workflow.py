@@ -183,10 +183,18 @@ class WorkflowDev(Workflow):
         return len(stack) == 1 and self._read_phase() is Phase.REFACTORING
 
     def begin_task(self, task: str, issue_number: str | None = None) -> None:
-        """Start a task. Sets root frame to idle (refactoring, no mode)."""
+        """Start a task. Creates branch, sets root frame to idle."""
         phase = self._read_phase()
         if phase is not Phase.IDLE:
             raise ValueError(f"Cannot begin task: current phase is {phase.value}, expected idle")
+        # Create and checkout branch
+        branch = f"task/{task}"
+        result = subprocess.run(
+            ["git", "checkout", "-b", branch],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
         issue_url = None
         if issue_number:
             repo = self.get_repo()
@@ -384,11 +392,23 @@ class WorkflowDev(Workflow):
         self._write_issue_body(issue_url, body)
 
     def request_review(self) -> None:
-        """Request code review. Only from idle (root frame, no mode)."""
+        """Request code review. Pushes branch, runs tests, checks CI."""
         if not self._is_idle():
             raise ValueError("request-review only available from idle. Run end-step first.")
         self._run_tests()
-        self._check_ci()
+        # Push branch and check CI (skip if no remote)
+        has_remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=self.root,
+        ).returncode == 0
+        if has_remote:
+            result = subprocess.run(
+                ["git", "push", "-u", "origin", "HEAD"],
+                capture_output=True, text=True, cwd=self.root,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Push failed: {result.stderr}")
+            self._check_ci()
         head_sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             capture_output=True, text=True, cwd=self.root,
@@ -446,6 +466,42 @@ class WorkflowDev(Workflow):
             raise ValueError(
                 f"Code changed since last review (reviewed: {reviewed_sha[:8]}, "
                 f"HEAD: {head_sha[:8]}). Run request-review again."
+            )
+
+        # Merge branch to main (skip if already on main or no remote)
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True, text=True, cwd=self.root,
+        ).stdout.strip()
+        if branch and branch != "main":
+            subprocess.run(
+                ["git", "checkout", "main"],
+                capture_output=True, text=True, cwd=self.root,
+            )
+            result = subprocess.run(
+                ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
+                capture_output=True, text=True, cwd=self.root,
+            )
+            if result.returncode != 0:
+                subprocess.run(
+                    ["git", "checkout", branch],
+                    capture_output=True, cwd=self.root,
+                )
+                raise RuntimeError(f"Merge failed: {result.stderr}")
+            # Push main if remote exists
+            has_remote = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                capture_output=True, text=True, cwd=self.root,
+            ).returncode == 0
+            if has_remote:
+                subprocess.run(
+                    ["git", "push", "origin", "main"],
+                    capture_output=True, text=True, cwd=self.root,
+                )
+            # Delete branch
+            subprocess.run(
+                ["git", "branch", "-d", branch],
+                capture_output=True, cwd=self.root,
             )
 
         issue_url = self._issue_url_from_state()
@@ -529,13 +585,30 @@ class WorkflowDev(Workflow):
     CI_TIMEOUT = 30 * 60  # 30 minutes
 
     def _check_ci(self) -> None:
-        """Check pending CI run if recorded by post-push hook. Blocks until complete."""
-        state = self.read_state()
-        run_id = state.get("pending_ci_run")
-        if not run_id:
-            return
-
+        """Wait for CI on the current branch to complete. Blocks until done."""
         env = self._gh_env()
+
+        # Get current branch
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True, text=True, cwd=self.root,
+        ).stdout.strip()
+        if not branch:
+            return  # detached HEAD, skip CI check
+
+        # Wait briefly for the run to register after push
+        time.sleep(5)
+
+        # Find the latest run for this branch
+        result = subprocess.run(
+            ["gh", "run", "list", "--branch", branch, "--limit", "1",
+             "--json", "databaseId", "--jq", ".[0].databaseId"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            raise RuntimeError(f"Could not find CI run for branch {branch}: {result.stderr}")
+
+        run_id = result.stdout.strip()
         deadline = time.time() + self.CI_TIMEOUT
 
         # Poll until run completes or timeout
@@ -556,11 +629,6 @@ class WorkflowDev(Workflow):
             conclusion = parts[1] if len(parts) > 1 else ""
 
             if status == "completed":
-                # Clear pending run
-                stack = self._read_stack()
-                stack[-1].pop("pending_ci_run", None)
-                self._save_stack(stack)
-
                 if conclusion != "success":
                     raise RuntimeError(
                         f"CI run {run_id} failed ({conclusion}). "
