@@ -40,7 +40,8 @@ class StepMode(Enum):
 CMD_STARTUP = "startup"
 CMD_BEGIN_TASK = "begin-task"
 CMD_END_TASK = "end-task"
-CMD_BEGIN_STEP = "begin-step"
+CMD_BEGIN_REFACTOR = "begin-refactor"
+CMD_BEGIN_MODIFY = "begin-modify"
 CMD_END_STEP = "end-step"
 CMD_ABORT_STEP = "abort-step"
 CMD_REQUEST_REVIEW = "request-review"
@@ -198,21 +199,24 @@ class WorkflowDev(Workflow):
         self._save_stack(sf["stack"], history=sf["history"])
         self._set_label(self.LABEL_IDLE)
 
-    def begin_step(self, description: str, mode: str,
-                   rationale: list[str] | None = None) -> None:
-        """Push a step frame. Mode is 'code', 'test', or 'modify'.
+    def begin_refactor(self, description: str, mode: str) -> None:
+        """Push a refactoring step. Mode is 'code' or 'test'."""
+        if mode not in (StepMode.CODE.value, StepMode.TEST.value):
+            raise ValueError(f"Unknown refactor mode: {mode} (use code or test)")
+        self._begin_step(description, mode)
 
-        For modify mode, rationale is required: a list of
-        "test_name: current behaviour → expected behaviour" strings.
-        """
-        if mode not in (m.value for m in StepMode):
-            raise ValueError(f"Unknown mode: {mode} (use code, test, or modify)")
-        if mode == StepMode.MODIFY.value and not rationale:
+    def begin_modify(self, description: str, rationale: list[str]) -> None:
+        """Push a modify step. Rationale required: 'test: current → expected' pairs."""
+        if not rationale:
             raise ValueError(
-                "begin-step with modify requires a rationale: "
-                "list of 'test: current → expected' pairs describing "
-                "which test expectations will change."
+                "begin-modify requires rationale: "
+                "'test: current → expected' pairs."
             )
+        self._begin_step(description, StepMode.MODIFY.value, rationale=rationale)
+
+    def _begin_step(self, description: str, mode: str,
+                    rationale: list[str] | None = None) -> None:
+        """Internal: push a step frame."""
         phase = self._read_phase()
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"begin-step not available in {phase.value}. Use begin-task first.")
@@ -478,7 +482,7 @@ class WorkflowDev(Workflow):
             return False, "Edits blocked during review."
 
         if phase is Phase.REFACTORING and not mode:
-            return False, f"Idle — no step active. Use `workflow.py {CMD_BEGIN_STEP} <desc> <code|test|modify>` first."
+            return False, f"Idle — no step active. Use `{CMD_BEGIN_REFACTOR} <desc> <code|test>` or `{CMD_BEGIN_MODIFY} <desc> <rationale...>`."
 
         if mode == StepMode.CODE.value:
             if _is_test_file(rel_path):
@@ -611,14 +615,21 @@ def main() -> None:
         if issue_number:
             msg += f" · issue #{issue_number} → In Progress"
         print(msg)
-    elif command == CMD_BEGIN_STEP:
-        if len(sys.argv) < 4 or sys.argv[3] not in ("code", "test", "modify"):
-            print(f"Usage: workflow.py {CMD_BEGIN_STEP} <description> <code|test|modify> [rationale...]", file=sys.stderr)
-            print(f"  For modify: provide 'test: current → expected' pairs", file=sys.stderr)
+    elif command == CMD_BEGIN_REFACTOR:
+        args = sys.argv[2:]
+        if len(args) < 2 or args[1] not in ("code", "test"):
+            print(f"Usage: workflow.py {CMD_BEGIN_REFACTOR} <description> <code|test>", file=sys.stderr)
             sys.exit(1)
-        rationale = sys.argv[4:] if len(sys.argv) > 4 else None
-        wd.begin_step(sys.argv[2], sys.argv[3], rationale=rationale)
-        print(f"Step: [{sys.argv[3]}] {sys.argv[2]}")
+        wd.begin_refactor(args[0], args[1])
+        print(f"Step: [refactor/{args[1]}] {args[0]}")
+    elif command == CMD_BEGIN_MODIFY:
+        args = sys.argv[2:]
+        if len(args) < 2:
+            print(f"Usage: workflow.py {CMD_BEGIN_MODIFY} <description> <rationale...>", file=sys.stderr)
+            print(f"  Rationale: 'test: current → expected' pairs", file=sys.stderr)
+            sys.exit(1)
+        wd.begin_modify(args[0], args[1:])
+        print(f"Step: [modify] {args[0]}")
     elif command == CMD_END_STEP:
         commit_msg = sys.argv[2] if len(sys.argv) > 2 else None
         wd.end_step(commit_msg)
