@@ -198,10 +198,21 @@ class WorkflowDev(Workflow):
         self._save_stack(sf["stack"], history=sf["history"])
         self._set_label(self.LABEL_IDLE)
 
-    def begin_step(self, description: str, mode: str) -> None:
-        """Push a step frame. Mode is 'code', 'test', or 'modify'."""
+    def begin_step(self, description: str, mode: str,
+                   rationale: list[str] | None = None) -> None:
+        """Push a step frame. Mode is 'code', 'test', or 'modify'.
+
+        For modify mode, rationale is required: a list of
+        "test_name: current behaviour → expected behaviour" strings.
+        """
         if mode not in (m.value for m in StepMode):
             raise ValueError(f"Unknown mode: {mode} (use code, test, or modify)")
+        if mode == StepMode.MODIFY.value and not rationale:
+            raise ValueError(
+                "begin-step with modify requires a rationale: "
+                "list of 'test: current → expected' pairs describing "
+                "which test expectations will change."
+            )
         phase = self._read_phase()
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"begin-step not available in {phase.value}. Use begin-task first.")
@@ -240,8 +251,10 @@ class WorkflowDev(Workflow):
         # Tag the description with the mode
         tag = f"[refactor/{mode}]" if step_mode is not StepMode.MODIFY else "[modify]"
         tagged = f"{tag} {description}"
-        self._push_state(frame_phase, state.get("task"),
-                         step=tagged, mode=mode)
+        extra: dict[str, object] = {"step": tagged, "mode": mode}
+        if rationale:
+            extra["rationale"] = rationale
+        self._push_state(frame_phase, state.get("task"), **extra)
         self._set_label(label_map[step_mode])
         self._render_issue_todos()
 
@@ -280,8 +293,12 @@ class WorkflowDev(Workflow):
             ["git", "rev-parse", "HEAD"],
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
+        rationale = state.get("rationale")
         self._pop_state()
-        self._append_history({"step": step_name, "status": "completed", "commit": commit_sha})
+        entry: dict[str, object] = {"step": step_name, "status": "completed", "commit": commit_sha}
+        if rationale:
+            entry["rationale"] = rationale
+        self._append_history(entry)
         self._render_issue_todos()
 
     def abort_step(self, reason: str = "") -> None:
@@ -325,10 +342,12 @@ class WorkflowDev(Workflow):
             status = entry["status"]
             if status == "completed":
                 sha = entry.get("commit", "")
+                line = f"- [x] {step}"
                 if sha:
-                    lines.append(f"- [x] {step} ([{sha[:7]}](https://github.com/{repo}/commit/{sha}))")
-                else:
-                    lines.append(f"- [x] {step}")
+                    line += f" ([{sha[:7]}](https://github.com/{repo}/commit/{sha}))"
+                lines.append(line)
+                for r in entry.get("rationale", []):
+                    lines.append(f"  - {r}")
             elif status == "aborted":
                 reason = entry.get("reason", "")
                 if reason:
@@ -594,9 +613,11 @@ def main() -> None:
         print(msg)
     elif command == CMD_BEGIN_STEP:
         if len(sys.argv) < 4 or sys.argv[3] not in ("code", "test", "modify"):
-            print(f"Usage: workflow.py {CMD_BEGIN_STEP} <description> <code|test|modify>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_BEGIN_STEP} <description> <code|test|modify> [rationale...]", file=sys.stderr)
+            print(f"  For modify: provide 'test: current → expected' pairs", file=sys.stderr)
             sys.exit(1)
-        wd.begin_step(sys.argv[2], sys.argv[3])
+        rationale = sys.argv[4:] if len(sys.argv) > 4 else None
+        wd.begin_step(sys.argv[2], sys.argv[3], rationale=rationale)
         print(f"Step: [{sys.argv[3]}] {sys.argv[2]}")
     elif command == CMD_END_STEP:
         commit_msg = sys.argv[2] if len(sys.argv) > 2 else None

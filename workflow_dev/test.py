@@ -118,10 +118,19 @@ class StateTransitionTest(TestFixture):
     def test_modify_step(self):
         wd = self._make_wd()
         wd.begin_task("task-1")
-        wd.begin_step("Add feature", "modify")
+        wd.begin_step("Add feature", "modify",
+                       rationale=["test_x: no feature → feature exists"])
         state = wd.read_state()
         self.assertEqual(state["mode"], "modify")
         self.assertEqual(state["phase"], "modifying")
+        self.assertEqual(state["rationale"], ["test_x: no feature → feature exists"])
+
+    def test_modify_step_requires_rationale(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        with self.assertRaises(ValueError) as ctx:
+            wd.begin_step("Add feature", "modify")
+        self.assertIn("rationale", str(ctx.exception))
 
     def test_request_review_only_from_idle(self):
         wd = self._make_wd()
@@ -309,7 +318,7 @@ class CheckEditTest(TestFixture):
     def test_modify_step_allows_all(self):
         wd = self._make_wd()
         wd.begin_task("task-1")
-        wd.begin_step("Feature", "modify")
+        wd.begin_step("Feature", "modify", rationale=["test: change"])
         allowed_code, _ = wd.check_edit("workflow.py")
         allowed_test, _ = wd.check_edit("test.py")
         self.assertTrue(allowed_code)
@@ -353,7 +362,7 @@ class CheckWriteTest(TestFixture):
     def test_modify_step_allows_all(self):
         wd = self._make_wd()
         wd.begin_task("task-1")
-        wd.begin_step("Feature", "modify")
+        wd.begin_step("Feature", "modify", rationale=["test: change"])
         allowed, _ = wd.check_write("new_module.py")
         self.assertTrue(allowed)
 
