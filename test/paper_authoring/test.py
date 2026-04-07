@@ -15,7 +15,7 @@ from paper_authoring.workflow import (
     PaperAuthoring, ValidationError,
 )
 
-TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.md"
+TEMPLATE_PATH = Path(__file__).parent.parent.parent / "src" / "paper_authoring" / "templates" / "dashboard.md"
 
 
 def _make_dashboard(

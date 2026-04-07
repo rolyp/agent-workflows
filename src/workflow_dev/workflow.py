@@ -47,12 +47,18 @@ CMD_ABORT_STEP = "abort-step"
 CMD_REQUEST_REVIEW = "request-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
+CMD_CREATE_ISSUE = "create-issue"
 CMD_SUSPEND_PROTOCOL = "suspend-protocol"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
 
 def _is_test_file(path: str) -> bool:
-    """Heuristic: file is a test file if its name starts with 'test' or contains '_test'."""
+    """Check if a file is part of the test infrastructure."""
+    p = str(path)
+    # Structural: test/ directory or CI workflows
+    if p.startswith("test/") or ".github/workflows/" in p:
+        return True
+    # Filename fallback (for relative paths without directory prefix)
     name = Path(path).name
     stem = Path(path).stem
     return name.startswith("test") or stem.endswith("_test")
@@ -298,7 +304,7 @@ class WorkflowDev(Workflow):
                 ["git", "commit", "-m", commit_message],
                 capture_output=True, text=True, cwd=self.root,
             )
-            if result.returncode != 0:
+            if result.returncode != 0 and "nothing to commit" not in result.stdout:
                 raise RuntimeError(f"Commit failed: {result.stderr}")
         # Get the commit SHA (post-commit hook may have recorded it, or use HEAD)
         commit_sha = subprocess.run(
@@ -569,7 +575,7 @@ class WorkflowDev(Workflow):
 
     def _run_tests(self) -> None:
         """Run test.sh (mypy + pytest); raise if anything fails."""
-        test_script = self.root / "test.sh"
+        test_script = self.root / "test" / "test.sh"
         if not test_script.exists():
             raise FileNotFoundError(f"test.sh not found at {test_script}")
         result = subprocess.run(
@@ -596,19 +602,23 @@ class WorkflowDev(Workflow):
         if not branch:
             return  # detached HEAD, skip CI check
 
-        # Wait briefly for the run to register after push
-        time.sleep(5)
-
-        # Find the latest run for this branch
-        result = subprocess.run(
-            ["gh", "run", "list", "--branch", branch, "--limit", "1",
-             "--json", "databaseId", "--jq", ".[0].databaseId"],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            raise RuntimeError(f"Could not find CI run for branch {branch}: {result.stderr}")
-
-        run_id = result.stdout.strip()
+        # Wait for run to appear (retry up to 30s)
+        run_id = None
+        for _ in range(6):
+            time.sleep(5)
+            result = subprocess.run(
+                ["gh", "run", "list", "--branch", branch, "--limit", "1",
+                 "--json", "databaseId", "--jq", ".[0].databaseId"],
+                capture_output=True, text=True, env=env,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                run_id = result.stdout.strip()
+                break
+        if not run_id:
+            raise RuntimeError(
+                f"No CI run found for branch {branch} after 30s. "
+                f"Check that GitHub Actions is configured to run on this branch."
+            )
         deadline = time.time() + self.CI_TIMEOUT
 
         # Poll until run completes or timeout
@@ -722,6 +732,13 @@ def main() -> None:
     elif command == CMD_END_TASK:
         wd.end_task()
         print("Task complete; issue closed")
+    elif command == CMD_CREATE_ISSUE:
+        args = sys.argv[2:]
+        if len(args) < 2:
+            print(f"Usage: workflow.py {CMD_CREATE_ISSUE} <title> <body>", file=sys.stderr)
+            sys.exit(1)
+        url = wd.create_issue(args[0], args[1])
+        print(f"Created: {url}")
     elif command == CMD_SUSPEND_PROTOCOL:
         wd.suspend_protocol()
         print("Protocol suspended. Resume with: workflow.py resume-protocol")

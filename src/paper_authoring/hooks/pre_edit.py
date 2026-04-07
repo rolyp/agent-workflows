@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 # Add agent-workflows to path for imports
-sys.path.insert(0, str(Path.cwd() / "workflow" / "agent-workflows"))
+sys.path.insert(0, str(Path.cwd() / "workflow" / "agent-workflows" / "src"))
 from dispatch import get_workflow
 
 

@@ -24,8 +24,9 @@ class TestFixture(unittest.TestCase):
         shutil.rmtree(self.test_dir)
 
     def _make_wd(self) -> WorkflowDev:
-        # Create minimal test.sh so _run_tests succeeds in temp dir
-        test_sh = self.test_dir / "test.sh"
+        # Create minimal test/test.sh so _run_tests succeeds in temp dir
+        (self.test_dir / "test").mkdir(exist_ok=True)
+        test_sh = self.test_dir / "test" / "test.sh"
         test_sh.write_text("#!/bin/bash\nexit 0\n")
         test_sh.chmod(0o755)
         # Init git repo (with user config for CI environments)
@@ -192,7 +193,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
         # Make test.sh fail
-        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
+        (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         with self.assertRaises(RuntimeError):
             wd.end_step()
         # Step should still be on stack
@@ -203,11 +204,11 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
         # Fail first
-        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
+        (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         with self.assertRaises(RuntimeError):
             wd.end_step()
         # Fix and retry
-        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 0\n")
+        (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 0\n")
         wd.end_step()  # should succeed now
         self.assertNotIn("step", wd.read_state())
 
@@ -216,7 +217,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
         # Make test.sh fail — abort should still work
-        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
+        (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         wd.abort_step()  # no tests run
         self.assertNotIn("step", wd.read_state())
 
@@ -236,7 +237,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Bad change", "code")
-        (self.test_dir / "test.sh").write_text("#!/bin/bash\nexit 1\n")
+        (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         with self.assertRaises(RuntimeError):
             wd.end_step()
         history = wd._read_history()
@@ -402,8 +403,9 @@ class TodoMarkingTest(unittest.TestCase):
         orig_dir = os.getcwd()
         test_dir = Path(tempfile.mkdtemp())
         os.chdir(test_dir)
-        (test_dir / "test.sh").write_text("#!/bin/bash\nexit 0\n")
-        (test_dir / "test.sh").chmod(0o755)
+        (test_dir / "test").mkdir(exist_ok=True)
+        (test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 0\n")
+        (test_dir / "test" / "test.sh").chmod(0o755)
         import subprocess
         subprocess.run(["git", "init"], capture_output=True, cwd=test_dir)
         subprocess.run(["git", "commit", "--allow-empty", "-m", "init"],

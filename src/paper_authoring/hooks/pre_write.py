@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path.cwd() / "workflow" / "agent-workflows"))
+sys.path.insert(0, str(Path.cwd() / "workflow" / "agent-workflows" / "src"))
 from dispatch import get_workflow
 
 
