@@ -192,8 +192,9 @@ class Workflow(ABC):
             )
         return titles[0]
 
-    def create_issue(self, title: str, body: str) -> str:
-        """Create a GitHub issue, assign to active milestone and project with status Planned.
+    def create_issue(self, title: str, body: str,
+                     status: str = "Proposed") -> str:
+        """Create a GitHub issue, assign to active milestone and project.
 
         Uses GH_TOKEN for repo operations, GH_PROJECT_TOKEN for project operations.
         Falls back to .claude/settings.local.json if env vars not set.
@@ -211,12 +212,12 @@ class Workflow(ABC):
             raise RuntimeError(f"gh issue create failed: {result.stderr}")
         issue_url = result.stdout.strip()
 
-        # Add to project and set status to Planned
+        # Add to project and set status
         project_env = self._ensure_project_info()
         item_id = self._add_issue_to_project(
             issue_url, self._get_env("GH_PROJECT_ORG"),
             self._get_env("GH_PROJECT_NUMBER"), project_env)
-        self._set_item_status(item_id, "Planned", project_env)
+        self._set_item_status(item_id, status, project_env)
 
         return issue_url
 

@@ -47,6 +47,7 @@ CMD_ABORT_STEP = "abort-step"
 CMD_REQUEST_REVIEW = "request-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
+CMD_CREATE_ISSUE = "create-issue"
 CMD_SUSPEND_PROTOCOL = "suspend-protocol"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
@@ -722,6 +723,13 @@ def main() -> None:
     elif command == CMD_END_TASK:
         wd.end_task()
         print("Task complete; issue closed")
+    elif command == CMD_CREATE_ISSUE:
+        args = sys.argv[2:]
+        if len(args) < 2:
+            print(f"Usage: workflow.py {CMD_CREATE_ISSUE} <title> <body>", file=sys.stderr)
+            sys.exit(1)
+        url = wd.create_issue(args[0], args[1])
+        print(f"Created: {url}")
     elif command == CMD_SUSPEND_PROTOCOL:
         wd.suspend_protocol()
         print("Protocol suspended. Resume with: workflow.py resume-protocol")
