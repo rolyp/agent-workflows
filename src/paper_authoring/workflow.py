@@ -33,7 +33,7 @@ REVIEW_END = "\\reviewend"
 CHANGE_MARKUP = ("\\added", "\\deleted", "\\replaced")
 
 # Files managed exclusively by PaperAuthoring (block direct Edit)
-PROTECTED_FILES = ("workflow/todo/completed.md", "workflow/state.json")
+PROTECTED_FILES = ("workflow/state.json",)
 
 # CLI command names
 CMD_STARTUP = "startup"
@@ -81,12 +81,11 @@ class PaperAuthoring(Workflow):
     def __init__(self, project_root: Path):
         self.root = project_root
         self.structural_path = project_root / "workflow" / "todo" / "structural.md"
-        self.completed_path = project_root / "workflow" / "todo" / "completed.md"
         self.state_path = project_root / "workflow" / "state.json"
 
         # Preconditions: workflow files must exist
         missing = []
-        for path in (self.structural_path, self.completed_path):
+        for path in (self.structural_path,):
             if not path.exists():
                 missing.append(str(path.relative_to(self.root)))
         if missing:

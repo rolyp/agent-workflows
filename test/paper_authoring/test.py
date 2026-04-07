@@ -30,9 +30,6 @@ class TestFixture(unittest.TestCase):
         (self.test_dir / "workflow" / "todo" / "structural.md").write_text(
             "# Structural Review Notes\n"
         )
-        (self.test_dir / "workflow" / "todo" / "completed.md").write_text(
-            "# Completed\n\n## Minor\n\n## Structural\n"
-        )
 
     def _make_workflow(self) -> PaperAuthoring:
         self._write_workflow_files()
