@@ -20,6 +20,7 @@ READ_ONLY = (
     "grep ", "rg ", "echo ",
     "python3 -m pytest",
     "gh issue view",
+    "gh issue list",
     "gh pr view",
     "gh run view",
     "gh run list",
