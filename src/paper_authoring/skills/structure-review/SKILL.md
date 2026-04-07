@@ -8,21 +8,17 @@ agent: general-purpose
 
 # Structure Reviewer
 
-- Read existing structural tasks in `workflow/todo/structural.md` and any linked documents (reviews, plans) before starting
-- Re-read full paper in light of existing tasks and recent structural changes
-- Update or remove criticisms that have been addressed
-- Add new items if structural changes have introduced new issues; each item should include a **Proposed action** (the concrete change proposed) alongside the diagnosis
+- Read existing structural issues (if any) before starting
+- Re-read full paper in light of existing issues and recent structural changes
+- Produce findings as a single GitHub Issue via `workflow.py create-issue`
 
-## Note format
+## Output
 
-Each item in `structural.md`:
+A single issue titled "Structure Review" with findings as a checklist:
 
+```markdown
+- [ ] **One-line summary.** Diagnosis: what the problem is. Proposed action: the concrete change proposed.
+- [ ] **Another finding.** Diagnosis: ... Proposed action: ...
 ```
-### Note structural-N
 
-One-line summary (with links to source reviews/plans)
-
-**Diagnosis:** what the problem is and where it occurs
-
-**Proposed action:** the concrete change proposed
-```
+During triage, the author promotes accepted items to standalone Planned issues.

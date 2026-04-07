@@ -26,4 +26,11 @@ Performed by Author Assistant directly — no subagent spawned.
 ## Full-paper review (on demand)
 
 - Read the full paper; review for low-level textual issues throughout
-- Insert `\todo` annotations directly into `.tex` files at each issue found
+- Produce findings as a single GitHub Issue via `workflow.py create-issue` titled "Copy Edit Review"
+- Each finding as a checklist item:
+
+```markdown
+- [ ] **Location (file:line).** Issue description. Suggested fix.
+```
+
+During triage, the author promotes accepted items to standalone Planned issues.
