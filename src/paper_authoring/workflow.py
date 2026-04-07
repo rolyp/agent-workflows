@@ -853,53 +853,6 @@ class PaperAuthoring(Workflow):
 
     # --- GitHub Issues integration ---
 
-    def _parse_todo_tasks(self, dashboard: str, section: str) -> list[dict]:
-        """Parse tasks from a dashboard To Do section.
-
-        Returns list of {description, note_id, note_file} dicts.
-        """
-        pattern = rf"^### {section}$\n\n(.*?)(?=\n### |\Z)"
-        match = re.search(pattern, dashboard, re.MULTILINE | re.DOTALL)
-        if not match:
-            return []
-        content = match.group(1).strip()
-        if content == "(none)":
-            return []
-        tasks = []
-        for line in content.split("\n"):
-            m = re.match(
-                r"^- (.+?) \(\[note\]\(todo/(.*?)#note-(.*?)\)\)(.*)$", line
-            )
-            if m:
-                tasks.append({
-                    "description": m.group(1),
-                    "note_file": m.group(2),
-                    "note_id": m.group(3),
-                    "suffix": m.group(4),  # preserve any trailing text
-                })
-        return tasks
-
-    def _read_note_body(self, note_file: str, note_id: str) -> str:
-        """Read the body of a note from structural.md or minor-issues.md."""
-        path = self.root / "workflow" / "todo" / note_file
-        if not path.exists():
-            return ""
-        text = path.read_text()
-        pattern = rf"### Note {re.escape(note_id)}\n(.*?)(?=\n### |\Z)"
-        match = re.search(pattern, text, re.DOTALL)
-        return match.group(1).strip() if match else ""
-
-    def _format_dashboard_entry(self, task: dict, issue_url: str | None = None) -> str:
-        """Format a dashboard entry line from a parsed task dict."""
-        entry = (
-            f"- {task['description']} "
-            f"([note](todo/{task['note_file']}#note-{task['note_id']}))"
-        )
-        if issue_url:
-            entry += f" · [issue]({issue_url})"
-        entry += task["suffix"]
-        return entry
-
     def parse_review_issue(self, issue_number: str) -> list[tuple[str, str]]:
         """Parse accepted findings from a review issue's checklist.
 
@@ -929,29 +882,6 @@ class PaperAuthoring(Workflow):
             urls.append(url)
         return urls
 
-    def create_github_issues(self) -> None:
-        """Create GitHub Issues for all To Do tasks and store URLs in dashboard."""
-        dashboard = self._read_dashboard()
-
-        # Structural tasks: one issue each
-        for task in self._parse_todo_tasks(dashboard, "Structural"):
-            body = self._read_note_body(task["note_file"], task["note_id"])
-            url = self.create_issue(task["description"], body)
-            old_entry = self._format_dashboard_entry(task)
-            new_entry = self._format_dashboard_entry(task, issue_url=url)
-            dashboard = dashboard.replace(old_entry, new_entry, 1)
-
-        # Minor tasks: single issue with checkbox list
-        minor_tasks = self._parse_todo_tasks(dashboard, "Minor")
-        if minor_tasks:
-            body_lines = [f"- [ ] {t['description']}" for t in minor_tasks]
-            url = self.create_issue("Minor issues", "\n".join(body_lines))
-            for task in minor_tasks:
-                old_entry = self._format_dashboard_entry(task)
-                new_entry = self._format_dashboard_entry(task, issue_url=url)
-                dashboard = dashboard.replace(old_entry, new_entry, 1)
-
-        self.dashboard_path.write_text(dashboard)
 
 
 # --- CLI entry point ---
