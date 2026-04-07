@@ -54,26 +54,26 @@ Foreground subagents block **Author Assistant** until they return. Workflow stat
 
 ## Entry points
 
-Two independent entry points can populate the dashboard before the editing cycle begins. When both apply, run reviewer feedback triage first — external feedback may reshape direction, making some structural/copy-edit findings moot.
+Two independent entry points can create review issues before the editing cycle begins. When both apply, run reviewer feedback triage first — external feedback may reshape direction, making some structural/copy-edit findings moot.
 
 ### Cold start
 
 For a pre-existing paper not yet using this workflow.
 
-- Invoke **Structure Reviewer** for full-paper initial pass → augments `workflow/todo/structural.md`
-- Optionally invoke **Copy Editor** in full-paper review mode (skip if paper is a rough draft) → augments `workflow/todo/minor-issues.md`
-- Enter triage (`begin-triage`); **Author** iterates:
-  - **Approve item** → add to dashboard via `add-task`
-  - **Reclassify** → move between structural/minor via `reclassify`
-  - **Revise** → edit the note (change description, merge, split)
-- When satisfied: `approve-triage` → enter idle, ready for editing cycle
+- Invoke **Structure Reviewer** for full-paper initial pass → creates a "Structure Review" issue with findings as checklist
+- Optionally invoke **Copy Editor** in full-paper review mode → creates a "Copy Edit Review" issue with findings as checklist
+- Enter triage (`begin-triage`); **Author** iterates through review issue checklist:
+  - **Accept finding** → `create-issue` to make a standalone Planned task
+  - **Reject finding** → check off with reason
+  - **Revise** → edit the finding description
+- When all items dispositioned: `approve-triage` → enter idle, ready for editing cycle
 
 ### Reviewer feedback triage
 
-For a paper (pre-existing or authored using this workflow) that has received external reviews.
+For a paper that has received external reviews.
 
 - **Author Assistant** reads reviews (e.g. `reviews/*.md`), extracts actionable items
-- Classify each as structural or minor; record in `workflow/todo/structural.md` or `workflow/todo/minor-issues.md` with links to source review files
+- Creates a review issue with findings as checklist (same format as Structure/Copy reviewer output)
 - Enter triage; **Author** iterates (same loop as cold start above)
 - When satisfied: `approve-triage`
 
@@ -112,6 +112,6 @@ The editing cycle has four phases:
 **Structural close-out** (structural issues only):
 - Invoke **Copy Editor** on affected paragraphs (max 3 iterations)
 - If **Copy Editor** fails to approve: return to **Author**
-- If **Copy Editor** approves: invoke **Structure Reviewer** to confirm resolution and update `workflow/todo/structural.md`
-- If **Structure Reviewer** confirms: run `complete-tree`; return to Task selection
-- If **Structure Reviewer** flags new issues: run `add`; return to Task selection
+- If **Copy Editor** approves: invoke **Structure Reviewer** to confirm resolution
+- If **Structure Reviewer** confirms: close the task issue; return to Task selection
+- If **Structure Reviewer** flags new issues: create new review issue; enter triage
