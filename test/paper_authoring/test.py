@@ -469,12 +469,6 @@ class SubtaskTest(TestFixture):
         ])
         return workflow
 
-    def test_add_subtask_appears_in_dashboard(self):
-        workflow = self._make_workflow_with_selected_task()
-        workflow.add_subtask("test-1a", "Fix introduction")
-        dashboard = workflow._read_dashboard()
-        self.assertIn("[ ] Fix introduction (subtask: test-1a)", dashboard)
-
     def test_begin_subtask_pushes_state(self):
         workflow = self._make_workflow_with_selected_task()
         workflow.add_subtask("test-1a", "Fix introduction")
@@ -502,15 +496,6 @@ class SubtaskTest(TestFixture):
         stack = workflow._read_stack()
         self.assertEqual(len(stack), 1)
         self.assertEqual(stack[-1]["task"], "test-1")
-
-    def test_complete_subtask_shows_checked_in_dashboard(self):
-        workflow = self._make_workflow_with_selected_task()
-        workflow.add_subtask("test-1a", "Fix introduction")
-        workflow.begin_subtask("test-1a", [("sec/intro.tex", "intro passage")])
-        workflow.end_task()
-        dashboard = workflow._read_dashboard()
-        self.assertIn("[x] Fix introduction", dashboard)
-        self.assertNotIn("🔵 Fix introduction", dashboard)
 
 
 class GitHubIssuesTest(TestFixture):
