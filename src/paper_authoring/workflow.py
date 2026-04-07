@@ -477,7 +477,7 @@ class PaperAuthoring(Workflow):
                 capture_output=True, text=True, cwd=self.root,
             )
             if result.returncode != 0:
-                print(result.stdout + result.stderr, file=__import__('sys').stderr)
+                print(result.stdout + result.stderr, file=sys.stderr)
 
     def _require_active_task(self) -> None:
         phase = self._read_phase()
