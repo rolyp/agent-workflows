@@ -104,7 +104,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Fix imports", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         state = wd.read_state()
         self.assertNotIn("step", state)
         self.assertNotIn("mode", state)
@@ -115,9 +115,9 @@ class StateTransitionTest(TestFixture):
         wd.begin_refactor("Outer", "code")
         wd.begin_refactor("Inner", "code")
         self.assertEqual(wd.read_state()["step"], "[refactor/code] Inner")
-        wd.end_step()
+        wd.end_step("test commit")
         self.assertEqual(wd.read_state()["step"], "[refactor/code] Outer")
-        wd.end_step()
+        wd.end_step("test commit")
         self.assertNotIn("step", wd.read_state())
 
     def test_modify_step(self):
@@ -154,7 +154,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "test")
-        wd.end_step()
+        wd.end_step("test commit")
         wd.request_review()
         self.assertEqual(wd.read_state()["phase"], "review")
         self._submit_mock_reviews(wd)
@@ -166,7 +166,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         wd.request_review()
         self._submit_mock_reviews(wd)
         wd.feedback()
@@ -178,7 +178,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         wd.request_review()
         with self.assertRaises(ValueError) as ctx:
             wd.feedback()
@@ -188,7 +188,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         wd.request_review()
         with self.assertRaises(ValueError) as ctx:
             wd.approve()
@@ -198,7 +198,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         wd.request_review()
         self._submit_mock_reviews(wd)
         wd.approve()
@@ -215,7 +215,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         with self.assertRaises(ValueError):
-            wd.end_step()
+            wd.end_step("test commit")
 
     def test_end_step_failure_keeps_step_on_stack(self):
         wd = self._make_wd()
@@ -224,7 +224,7 @@ class StateTransitionTest(TestFixture):
         # Make test.sh fail
         (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         with self.assertRaises(RuntimeError):
-            wd.end_step()
+            wd.end_step("test commit")
         # Step should still be on stack
         self.assertEqual(wd.read_state().get("step"), "[refactor/code] Work")
 
@@ -235,10 +235,10 @@ class StateTransitionTest(TestFixture):
         # Fail first
         (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         with self.assertRaises(RuntimeError):
-            wd.end_step()
+            wd.end_step("test commit")
         # Fix and retry
         (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 0\n")
-        wd.end_step()  # should succeed now
+        wd.end_step("test commit")  # should succeed now
         self.assertNotIn("step", wd.read_state())
 
     def test_abort_step_pops_without_tests(self):
@@ -254,7 +254,7 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Fix imports", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         history = wd._read_history()
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["step"], "[refactor/code] Fix imports")
@@ -268,7 +268,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_refactor("Bad change", "code")
         (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         with self.assertRaises(RuntimeError):
-            wd.end_step()
+            wd.end_step("test commit")
         history = wd._read_history()
         self.assertEqual(len(history), 0)
 
@@ -285,9 +285,9 @@ class StateTransitionTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Step 1", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         wd.begin_refactor("Step 2", "test")
-        wd.end_step()
+        wd.end_step("test commit")
         history = wd._read_history()
         self.assertEqual(len(history), 2)
 
@@ -362,7 +362,7 @@ class CheckEditTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         wd.request_review()
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
@@ -404,7 +404,7 @@ class CheckWriteTest(TestFixture):
         wd = self._make_wd()
         wd.begin_task("task-1")
         wd.begin_refactor("Work", "code")
-        wd.end_step()
+        wd.end_step("test commit")
         wd.request_review()
         allowed, _ = wd.check_write("new_file.py")
         self.assertFalse(allowed)

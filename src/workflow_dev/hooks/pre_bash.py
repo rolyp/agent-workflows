@@ -2,8 +2,8 @@
 """PreToolUse hook for Bash. Enforces protocol mode whitelist.
 
 In protocol mode (default), only whitelisted commands are allowed.
-Suspend with: ! python3 workflow_dev/workflow.py suspend-protocol
-Resume with: ! python3 workflow_dev/workflow.py resume-protocol
+Suspend with: ! python3 scripts/suspend-protocol.py
+Resume with: python3 src/workflow_dev/workflow.py resume-protocol
 """
 
 import json
@@ -30,7 +30,6 @@ WORKFLOW = (
     "python3 src/workflow_dev/workflow.py",
     "bash test/test.sh",
 )
-
 
 def _is_whitelisted(command: str) -> bool:
     """Check if a command matches the whitelist."""

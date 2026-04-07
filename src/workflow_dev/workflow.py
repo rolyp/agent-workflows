@@ -40,6 +40,7 @@ class StepMode(Enum):
 CMD_STARTUP = "startup"
 CMD_BEGIN_TASK = "begin-task"
 CMD_END_TASK = "end-task"
+CMD_SUSPEND_TASK = "suspend-task"
 CMD_BEGIN_REFACTOR = "begin-refactor"
 CMD_BEGIN_MODIFY = "begin-modify"
 CMD_END_STEP = "end-step"
@@ -50,7 +51,7 @@ CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
 CMD_REOPEN_ISSUE = "reopen-issue"
-CMD_SUSPEND_PROTOCOL = "suspend-protocol"
+CMD_ADD_TO_PROJECT = "add-to-project"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
 
@@ -170,18 +171,24 @@ class WorkflowDev(Workflow):
         return len(stack) == 1 and self._read_phase() is Phase.REFACTORING
 
     def begin_task(self, task: str, issue_number: str | None = None) -> None:
-        """Start a task. Creates branch, sets root frame to idle."""
+        """Start or resume a task. Creates or switches to branch, sets root frame to idle."""
         phase = self._read_phase()
         if phase is not Phase.IDLE:
             raise ValueError(f"Cannot begin task: current phase is {phase.value}, expected idle")
-        # Create and checkout branch
+        # Create or switch to branch
         branch = f"task/{task}"
         result = subprocess.run(
-            ["git", "checkout", "-b", branch],
+            ["git", "switch", branch],
             capture_output=True, text=True, cwd=self.root,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
+            # Branch doesn't exist — create it
+            result = subprocess.run(
+                ["git", "switch", "-c", branch],
+                capture_output=True, text=True, cwd=self.root,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
         issue_url = None
         if issue_number:
             repo = self.get_repo()
@@ -257,12 +264,8 @@ class WorkflowDev(Workflow):
         self._set_label(label_map[step_mode])
         self._render_issue_todos()
 
-    def end_step(self, commit_message: str | None = None) -> None:
-        """Pop the current step. Runs tests, commits, records in history.
-
-        If commit_message is provided, stages all changes and commits.
-        If not provided, requires a clean working tree.
-        """
+    def end_step(self, commit_message: str) -> None:
+        """Pop the current step. Runs tests, stages all changes, commits, records in history."""
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
@@ -276,17 +279,16 @@ class WorkflowDev(Workflow):
             sf["stack"][-1]["end_step_failed"] = True
             self._save_stack(sf["stack"], history=sf["history"])
             raise
-        # Commit if message provided
-        if commit_message:
-            subprocess.run(
-                ["git", "add", "-A"], capture_output=True, cwd=self.root,
-            )
-            result = subprocess.run(
-                ["git", "commit", "-m", commit_message],
-                capture_output=True, text=True, cwd=self.root,
-            )
-            if result.returncode != 0 and "nothing to commit" not in result.stdout:
-                raise RuntimeError(f"Commit failed: {result.stderr}")
+        # Stage and commit
+        subprocess.run(
+            ["git", "add", "-A"], capture_output=True, cwd=self.root,
+        )
+        result = subprocess.run(
+            ["git", "commit", "-m", commit_message],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if result.returncode != 0 and "nothing to commit" not in result.stdout:
+            raise RuntimeError(f"Commit failed: {result.stderr}")
         # Get the commit SHA (post-commit hook may have recorded it, or use HEAD)
         commit_sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -544,13 +546,31 @@ class WorkflowDev(Workflow):
             self.close_issue(issue_url)
         self._write_state(Phase.IDLE)
 
-    # --- Protocol suspension ---
+    def suspend_task(self) -> None:
+        """Park the current task. Switches to main, sets issue to Planned."""
+        if not self._is_idle():
+            raise ValueError("suspend-task only available from idle. Run end-step first.")
+        # Require clean working tree
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", ".", ":!state.json"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if status.stdout.strip():
+            raise ValueError(
+                "Working tree is not clean. Commit changes before suspend-task.\n"
+                f"{status.stdout.strip()}"
+            )
+        issue_url = self._issue_url_from_state()
+        if issue_url:
+            self.set_issue_status(issue_url, "Planned")
+            self.clear_issue_labels(issue_url)
+        self._write_state(Phase.IDLE)
+        subprocess.run(
+            ["git", "switch", "main"],
+            capture_output=True, text=True, cwd=self.root,
+        )
 
-    def suspend_protocol(self) -> None:
-        """Suspend protocol mode. Only for human use via ! prefix."""
-        sf = self._read_state_file()
-        sf["protocol_suspended"] = True
-        self._write_state_file(sf)
+    # --- Protocol suspension ---
 
     def resume_protocol(self) -> None:
         """Resume protocol mode."""
@@ -722,6 +742,9 @@ def main() -> None:
         if issue_number:
             msg += f" · issue #{issue_number} → In Progress"
         print(msg)
+    elif command == CMD_SUSPEND_TASK:
+        wd.suspend_task()
+        print("Task suspended; back to main")
     elif command == CMD_BEGIN_REFACTOR:
         args = sys.argv[2:]
         if len(args) < 2 or args[1] not in ("code", "test"):
@@ -738,8 +761,10 @@ def main() -> None:
         wd.begin_modify(args[0], args[1:])
         print(f"Step: [modify] {args[0]}")
     elif command == CMD_END_STEP:
-        commit_msg = sys.argv[2] if len(sys.argv) > 2 else None
-        wd.end_step(commit_msg)
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_END_STEP} <commit-message>", file=sys.stderr)
+            sys.exit(1)
+        wd.end_step(sys.argv[2])
         print("Step complete; back to idle")
     elif command == CMD_ABORT_STEP:
         reason = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -784,9 +809,17 @@ def main() -> None:
         issue_url = f"https://github.com/{repo}/issues/{args[0]}"
         wd.reopen_issue(issue_url)
         print(f"Reopened: issue #{args[0]}")
-    elif command == CMD_SUSPEND_PROTOCOL:
-        wd.suspend_protocol()
-        print("Protocol suspended. Resume with: workflow.py resume-protocol")
+    elif command == CMD_ADD_TO_PROJECT:
+        args = sys.argv[2:]
+        if len(args) < 1:
+            print(f"Usage: workflow.py {CMD_ADD_TO_PROJECT} <issue-number> [status]", file=sys.stderr)
+            print(f"  status: Proposed (default), Planned, In Progress, Done", file=sys.stderr)
+            sys.exit(1)
+        repo = wd.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{args[0]}"
+        status = args[1] if len(args) > 1 else "Proposed"
+        wd.add_to_project(issue_url, status)
+        print(f"Added #{args[0]} to project as {status}")
     elif command == CMD_RESUME_PROTOCOL:
         wd.resume_protocol()
         print("Protocol resumed.")
