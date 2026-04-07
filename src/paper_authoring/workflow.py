@@ -225,60 +225,33 @@ class PaperAuthoring(Workflow):
 
     AD_HOC = "Ad hoc"
 
-    def begin_task(self, task_ref: str, regions: list[tuple[str, str]]) -> None:
-        """Select a task; move to In Progress; place edit bars.
+    def begin_task(self, issue_number: str, regions: list[tuple[str, str]]) -> None:
+        """Select a task by issue number; move to In Progress; place edit bars.
 
-        task_ref: either a note_id (reads from dashboard) or an issue number
-        (reads from GitHub). Numeric strings are treated as issue numbers.
+        issue_number: GitHub issue number.
         regions: list of (file_path, passage) pairs to place edit bars around.
         """
         if not regions:
             raise ValueError("At least one edit region required")
 
-        issue_url: str | None = None
-        note_link: str | None = None
-
-        if task_ref.isdigit():
-            # Issue-based: read from GitHub
-            repo = self.get_repo()
-            issue_url = f"https://github.com/{repo}/issues/{task_ref}"
-            env = self._gh_env()
-            result = subprocess.run(
-                ["gh", "issue", "view", task_ref, "--repo", repo,
-                 "--json", "title", "--jq", ".title"],
-                capture_output=True, text=True, env=env,
-            )
-            if result.returncode != 0:
-                raise ValueError(f"Issue #{task_ref} not found: {result.stderr}")
-            description = result.stdout.strip()
-            note_id = task_ref
-            note_link = None
-        else:
-            # Note-based: read from dashboard (legacy)
-            note_id = task_ref
-            dashboard = self._read_dashboard()
-            pattern = rf"^- .+#note-{re.escape(note_id)}\).*$"
-            match = re.search(pattern, dashboard, re.MULTILINE)
-            if not match:
-                raise ValueError(f"Task '{note_id}' not found in To do")
-            task_line = match.group(0)
-            desc_match = re.match(r"^- (.+?) \(\[note\]\((.+?)\)\)(.*)$", task_line)
-            description = desc_match.group(1) if desc_match else task_line[2:]
-            note_link = desc_match.group(2) if desc_match else None
-            suffix = desc_match.group(3) if desc_match else ""
-            issue_match = re.search(r"\[issue\]\((.+?)\)", suffix)
-            issue_url = issue_match.group(1) if issue_match else None
-            # Remove from To do
-            dashboard = dashboard.replace(task_line + "\n", "")
-            self.dashboard_path.write_text(dashboard)
+        repo = self.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+        env = self._gh_env()
+        result = subprocess.run(
+            ["gh", "issue", "view", issue_number, "--repo", repo,
+             "--json", "title", "--jq", ".title"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise ValueError(f"Issue #{issue_number} not found: {result.stderr}")
+        description = result.stdout.strip()
 
         # Place edit bars
         for file_path, passage in regions:
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
         # Update state
-        self._write_state(Phase.EDIT, note_id, regions=regions,
-                          description=description, note_link=note_link,
-                          issue_url=issue_url)
+        self._write_state(Phase.EDIT, issue_number, regions=regions,
+                          description=description, issue_url=issue_url)
         # Update GitHub
         if issue_url:
             try:
