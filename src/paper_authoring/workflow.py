@@ -39,7 +39,6 @@ PROTECTED_FILES = ("workflow/dashboard.md", "workflow/todo/completed.md", "workf
 CMD_STARTUP = "startup"
 CMD_BEGIN_TRIAGE = "begin-triage"
 CMD_RECLASSIFY = "reclassify"
-CMD_ADD_TASK = "add-task"
 CMD_APPROVE_TRIAGE = "approve-triage"
 CMD_BEGIN_TASK = "begin-task"
 CMD_BEGIN_AD_HOC = "begin-ad-hoc"
@@ -209,48 +208,6 @@ class PaperAuthoring(Workflow):
         # Append to target
         target_text = target_path.read_text().rstrip()
         target_path.write_text(target_text + "\n\n" + note_block + "\n")
-
-    def add_task(self, note_id: str, description: str, kind: str) -> None:
-        """Add a task to the dashboard To do section.
-
-        kind must be 'structural' or 'minor'.
-        note_id is used to generate the link to the notes file.
-        """
-        assert kind in ("structural", "minor"), f"Invalid kind: {kind}"
-        dashboard = self._read_dashboard()
-
-        # Reject duplicates
-        anchor = f"#note-{note_id})"
-        if anchor in dashboard:
-            raise ValueError(f"Task '{note_id}' already exists in dashboard")
-
-        notes_file = "structural.md" if kind == "structural" else "minor-issues.md"
-        link = f"[note](todo/{notes_file}#note-{note_id})"
-        entry = f"- {description} ({link})"
-
-        # Insert under the appropriate ### heading
-        section = kind.capitalize()
-        pattern = rf"(^### {section}$\n\n)(.*?)(?=^### |\Z)"
-        match = re.search(pattern, dashboard, re.MULTILINE | re.DOTALL)
-        if not match:
-            raise ValueError(f"Section '### {section}' not found in dashboard")
-
-        existing = match.group(2).strip()
-        if existing == "(none)":
-            new_items = entry + "\n\n"
-        else:
-            new_items = existing + "\n" + entry + "\n\n"
-
-        dashboard = dashboard[:match.start(2)] + new_items + dashboard[match.end(2):]
-
-        # Update count
-        count_pattern = rf"(Completed {kind}.*?\(\d+ of )(\d+)\)"
-        count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
-        if count_match:
-            old_total = int(count_match.group(2))
-            dashboard = dashboard[:count_match.start(2)] + str(old_total + 1) + ")" + dashboard[count_match.end():]
-
-        self.dashboard_path.write_text(dashboard)
 
     def approve_triage(self, review_issue_number: str) -> None:
         """Exit triage. Promotes accepted findings from review issue to standalone issues.
@@ -813,12 +770,6 @@ def main() -> None:
             sys.exit(1)
         workflow.reclassify(sys.argv[2], sys.argv[3])
         print(f"Reclassified {sys.argv[2]} → {sys.argv[3]}")
-    elif command == CMD_ADD_TASK:
-        if len(sys.argv) < 5:
-            print(f"Usage: workflow.py {CMD_ADD_TASK} <note-id> <description> <structural|minor>", file=sys.stderr)
-            sys.exit(1)
-        workflow.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
-        print(f"Added {sys.argv[4]} task: {sys.argv[3]}")
     elif command == CMD_APPROVE_TRIAGE:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_APPROVE_TRIAGE} <review-issue-number>", file=sys.stderr)

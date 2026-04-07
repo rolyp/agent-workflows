@@ -358,63 +358,6 @@ class TriageTest(TestFixture):
             workflow.reclassify("structural-99", "minor")
 
 
-class AddTaskTest(TestFixture):
-    def test_add_structural_task(self):
-        workflow = self._make_workflow()
-        workflow.add_task("structural-3", "New issue found", "structural")
-        dashboard = workflow._read_dashboard()
-        self.assertIn("- New issue found (", dashboard)
-        self.assertIn("note-structural-3", dashboard)
-        self.assertIn("0 of 3", dashboard)  # was 2, now 3
-
-    def test_add_minor_task(self):
-        workflow = self._make_workflow()
-        workflow.add_task("minor-1", "Fix typo", "minor")
-        dashboard = workflow._read_dashboard()
-        self.assertIn("- Fix typo (", dashboard)
-        self.assertIn("note-minor-1", dashboard)
-        self.assertIn("0 of 1", dashboard)  # was 0, now 1
-
-    def test_add_first_minor_replaces_none(self):
-        workflow = self._make_workflow()
-        workflow.add_task("minor-1", "Fix typo", "minor")
-        dashboard = workflow._read_dashboard()
-        # Should not have (none) under Minor anymore
-        minor_section = re.search(
-            r"^### Minor$\n(.*?)(?=^### |\Z)", dashboard, re.MULTILINE | re.DOTALL
-        )
-        self.assertNotIn("(none)", minor_section.group(1))
-
-    def test_add_preserves_existing_tasks(self):
-        workflow = self._make_workflow()
-        workflow.add_task("structural-3", "First new", "structural")
-        workflow.add_task("structural-4", "Second new", "structural")
-        dashboard = workflow._read_dashboard()
-        self.assertIn("Task one", dashboard)
-        self.assertIn("First new", dashboard)
-        self.assertIn("Second new", dashboard)
-        self.assertIn("0 of 4", dashboard)
-
-    def test_validation_passes_after_add(self):
-        workflow = self._make_workflow()
-        workflow.add_task("structural-3", "New task", "structural")
-        workflow.assert_valid()  # should not raise
-
-    def test_duplicate_rejected(self):
-        workflow = self._make_workflow()
-        workflow.add_task("structural-3", "New task", "structural")
-        with self.assertRaises(ValueError) as ctx:
-            workflow.add_task("structural-3", "Same task again", "structural")
-        self.assertIn("already exists", str(ctx.exception))
-
-    def test_blank_line_between_sections(self):
-        workflow = self._make_workflow()
-        workflow.add_task("minor-1", "Fix typo", "minor")
-        dashboard = workflow._read_dashboard()
-        # There should be a blank line before ### Structural
-        self.assertIn("\n\n### Structural", dashboard)
-
-
 class CheckWriteTest(TestFixture):
     def test_write_allowed_for_new_file(self):
         workflow = self._make_workflow()
@@ -431,47 +374,6 @@ class CheckWriteTest(TestFixture):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class SubtaskTest(TestFixture):
-    def _make_workflow_with_selected_task(self):
-        workflow = self._make_workflow()
-        workflow.add_task("test-1", "Big task", "structural")
-        (self.test_dir / "sec" / "intro.tex").write_text("intro passage\n")
-        (self.test_dir / "sec" / "related.tex").write_text("related passage\n")
-        workflow.begin_task("test-1", [
-            ("sec/intro.tex", "intro passage"),
-            ("sec/related.tex", "related passage"),
-        ])
-        return workflow
-
-    def test_begin_subtask_pushes_state(self):
-        workflow = self._make_workflow_with_selected_task()
-        workflow.add_subtask("test-1a", "Fix introduction")
-        workflow.begin_subtask("test-1a", [("sec/intro.tex", "intro passage")])
-        stack = workflow._read_stack()
-        self.assertEqual(len(stack), 2)
-        self.assertEqual(stack[-1]["task"], "test-1a")
-
-    def test_begin_subtask_replaces_bars(self):
-        workflow = self._make_workflow_with_selected_task()
-        workflow.add_subtask("test-1a", "Fix introduction")
-        workflow.begin_subtask("test-1a", [("sec/intro.tex", "intro passage")])
-        # Parent bars removed from related.tex
-        related = (self.test_dir / "sec" / "related.tex").read_text()
-        self.assertNotIn(EDIT_START, related)
-        # Subtask bars placed in intro.tex
-        intro = (self.test_dir / "sec" / "intro.tex").read_text()
-        self.assertIn(EDIT_START, intro)
-
-    def test_complete_subtask_pops_state(self):
-        workflow = self._make_workflow_with_selected_task()
-        workflow.add_subtask("test-1a", "Fix introduction")
-        workflow.begin_subtask("test-1a", [("sec/intro.tex", "intro passage")])
-        workflow.end_task()
-        stack = workflow._read_stack()
-        self.assertEqual(len(stack), 1)
-        self.assertEqual(stack[-1]["task"], "test-1")
 
 
 class GitHubIssuesTest(TestFixture):
