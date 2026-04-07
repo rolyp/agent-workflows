@@ -893,6 +893,23 @@ class PaperAuthoring(Workflow):
         entry += task["suffix"]
         return entry
 
+    def parse_review_issue(self, issue_number: str) -> list[tuple[str, str]]:
+        """Parse accepted findings from a review issue's checklist.
+
+        Returns list of (title, body) pairs for unchecked items.
+        Checked/strikethrough items are treated as rejected.
+        """
+        repo = self.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+        body = self._read_issue_body(issue_url)
+        findings = []
+        for line in body.split("\n"):
+            line = line.strip()
+            if line.startswith("- [ ] "):
+                description = line[6:].strip()
+                findings.append((description, f"From review issue #{issue_number}"))
+        return findings
+
     def promote_findings(self, findings: list[tuple[str, str]]) -> list[str]:
         """Create a standalone issue for each finding.
 
