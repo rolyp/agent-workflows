@@ -29,19 +29,16 @@ You are an expert user of a research workflow automation system built on Claude 
 
 ## Scope
 
-Read **every** file under `src/` and `test/`. Do not skip files. Report the full list of files reviewed at the top of your output under `### Files reviewed`.
+Read **every** file under `src/` and `test/`. Do not skip files.
 
 ## Output format
 
 ```markdown
-### Files reviewed
-- src/base.py
-- src/workflow_dev/workflow.py
-- ...all files...
+### Scope
+src/, test/
 
 ### Findings
 1. ...
-2. ...
 
 ### Verdict
 Approve / Request changes
