@@ -49,6 +49,7 @@ CMD_SUBMIT_REVIEW = "submit-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
+CMD_REOPEN_ISSUE = "reopen-issue"
 CMD_SUSPEND_PROTOCOL = "suspend-protocol"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
@@ -774,6 +775,15 @@ def main() -> None:
             sys.exit(1)
         url = wd.create_issue(args[0], args[1])
         print(f"Created: {url}")
+    elif command == CMD_REOPEN_ISSUE:
+        args = sys.argv[2:]
+        if len(args) < 1:
+            print(f"Usage: workflow.py {CMD_REOPEN_ISSUE} <issue-number>", file=sys.stderr)
+            sys.exit(1)
+        repo = wd.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{args[0]}"
+        wd.reopen_issue(issue_url)
+        print(f"Reopened: issue #{args[0]}")
     elif command == CMD_SUSPEND_PROTOCOL:
         wd.suspend_protocol()
         print("Protocol suspended. Resume with: workflow.py resume-protocol")
