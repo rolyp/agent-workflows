@@ -53,7 +53,12 @@ CMD_RESUME_PROTOCOL = "resume-protocol"
 
 
 def _is_test_file(path: str) -> bool:
-    """Heuristic: file is a test file if its name starts with 'test' or contains '_test'."""
+    """Check if a file is part of the test infrastructure."""
+    p = str(path)
+    # Structural: test/ directory or CI workflows
+    if p.startswith("test/") or ".github/workflows/" in p:
+        return True
+    # Filename fallback (for relative paths without directory prefix)
     name = Path(path).name
     stem = Path(path).stem
     return name.startswith("test") or stem.endswith("_test")
@@ -570,7 +575,7 @@ class WorkflowDev(Workflow):
 
     def _run_tests(self) -> None:
         """Run test.sh (mypy + pytest); raise if anything fails."""
-        test_script = self.root / "test.sh"
+        test_script = self.root / "test" / "test.sh"
         if not test_script.exists():
             raise FileNotFoundError(f"test.sh not found at {test_script}")
         result = subprocess.run(

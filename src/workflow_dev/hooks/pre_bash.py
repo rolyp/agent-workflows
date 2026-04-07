@@ -27,8 +27,8 @@ READ_ONLY = (
 
 # Workflow commands (always allowed)
 WORKFLOW = (
-    "python3 workflow_dev/workflow.py",
-    "bash test.sh",
+    "python3 src/workflow_dev/workflow.py",
+    "bash test/test.sh",
 )
 
 
