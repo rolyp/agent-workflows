@@ -335,9 +335,16 @@ class PaperAuthoring(Workflow):
 
         self.dashboard_path.write_text(dashboard)
 
-    def approve_triage(self) -> None:
-        """Exit triage, enter idle. Creates GitHub Issues for all To Do tasks."""
-        self.create_github_issues()
+    def approve_triage(self, review_issue_number: str) -> None:
+        """Exit triage. Promotes accepted findings from review issue to standalone issues.
+
+        Closes the review issue after promotion.
+        """
+        findings = self.parse_review_issue(review_issue_number)
+        self.promote_findings(findings)
+        repo = self.get_repo()
+        review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
+        self.close_issue(review_url)
         self._write_state(Phase.IDLE)
 
     # --- Task selection ---
@@ -993,8 +1000,11 @@ def main() -> None:
         workflow.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
         print(f"Added {sys.argv[4]} task: {sys.argv[3]}")
     elif command == CMD_APPROVE_TRIAGE:
-        workflow.approve_triage()
-        print("Triage complete; entering idle")
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_APPROVE_TRIAGE} <review-issue-number>", file=sys.stderr)
+            sys.exit(1)
+        workflow.approve_triage(sys.argv[2])
+        print(f"Triage complete; review issue #{sys.argv[2]} closed")
     elif command == CMD_BEGIN_TASK:
         if len(sys.argv) < 4:
             print(f"Usage: workflow.py {CMD_BEGIN_TASK} <note-id> <regions-json>", file=sys.stderr)

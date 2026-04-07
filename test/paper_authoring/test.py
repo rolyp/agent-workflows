@@ -336,10 +336,15 @@ class TriageTest(TestFixture):
         state = workflow.read_state()
         self.assertEqual(state["phase"], "triage")
 
-    def test_approve_triage_returns_to_idle(self):
+    @patch("paper_authoring.workflow.PaperAuthoring.close_issue")
+    @patch("paper_authoring.workflow.PaperAuthoring._read_issue_body")
+    @patch("paper_authoring.workflow.PaperAuthoring.get_repo")
+    def test_approve_triage_returns_to_idle(self, mock_repo, mock_read, mock_close):
+        mock_repo.return_value = "owner/repo"
+        mock_read.return_value = ""
         workflow = self._make_workflow()
         workflow.begin_triage()
-        workflow.approve_triage()
+        workflow.approve_triage("1")
         state = workflow.read_state()
         self.assertEqual(state["phase"], "idle")
 
@@ -529,115 +534,86 @@ class SubtaskTest(TestFixture):
 
 
 class GitHubIssuesTest(TestFixture):
-    """Tests for GitHub Issues integration in approve_triage."""
+    """Tests for issue-based triage: approve_triage reads review issue, promotes findings."""
 
-    def _make_workflow_with_tasks(self):
-        """Set up workflow with structural and minor tasks in To Do."""
+    def _make_workflow_in_triage(self):
         workflow = self._make_workflow()
-        # Add structural notes
-        (self.test_dir / "workflow" / "todo" / "structural.md").write_text(
-            "# Structural Review Notes\n\n"
-            "### Note s-1\n\n"
-            "Diagnosis of first issue.\n\n"
-            "**Proposed action:** Fix the first thing.\n\n"
-            "### Note s-2\n\n"
-            "Second issue diagnosis.\n"
-        )
-        (self.test_dir / "workflow" / "todo" / "minor-issues.md").write_text(
-            "# Minor Issues\n\n"
-            "### Note m-1\n\nTypo on page 3.\n\n"
-            "### Note m-2\n\nMissing citation.\n"
-        )
-        workflow.add_task("s-1", "Fix introduction argument", "structural")
-        workflow.add_task("s-2", "Restructure related work", "structural")
-        workflow.add_task("m-1", "Fix typo on page 3", "minor")
-        workflow.add_task("m-2", "Add missing citation", "minor")
         workflow.begin_triage()
         return workflow
 
+    @patch("paper_authoring.workflow.PaperAuthoring.close_issue")
     @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
-    def test_approve_triage_creates_structural_issues(self, mock_create):
+    @patch("paper_authoring.workflow.PaperAuthoring._read_issue_body")
+    @patch("paper_authoring.workflow.PaperAuthoring.get_repo")
+    def test_approve_triage_creates_issues_from_review(self, mock_repo, mock_read, mock_create, mock_close):
+        mock_repo.return_value = "owner/repo"
+        mock_read.return_value = (
+            "## Structure Review\n\n"
+            "- [ ] Fix introduction argument\n"
+            "- [x] Already addressed point\n"
+            "- [ ] Restructure related work\n"
+        )
         mock_create.side_effect = [
-            "https://github.com/owner/repo/issues/1",
-            "https://github.com/owner/repo/issues/2",
-            "https://github.com/owner/repo/issues/3",  # minor batch
+            "https://github.com/owner/repo/issues/10",
+            "https://github.com/owner/repo/issues/11",
         ]
-        workflow = self._make_workflow_with_tasks()
-        workflow.approve_triage()
+        workflow = self._make_workflow_in_triage()
+        workflow.approve_triage("5")
 
-        # Two structural issues + one minor batch
-        self.assertEqual(mock_create.call_count, 3)
+        # Two unchecked items promoted, one checked item skipped
+        self.assertEqual(mock_create.call_count, 2)
+        self.assertEqual(mock_create.call_args_list[0][0][0], "Fix introduction argument")
+        self.assertEqual(mock_create.call_args_list[1][0][0], "Restructure related work")
 
-        # First structural issue
-        args1 = mock_create.call_args_list[0]
-        self.assertEqual(args1[0][0], "Fix introduction argument")
-        self.assertIn("first issue", args1[0][1])
-
-        # Second structural issue
-        args2 = mock_create.call_args_list[1]
-        self.assertEqual(args2[0][0], "Restructure related work")
-
-        # Minor batch issue
-        args3 = mock_create.call_args_list[2]
-        self.assertEqual(args3[0][0], "Minor issues")
-        self.assertIn("- [ ] Fix typo on page 3", args3[0][1])
-        self.assertIn("- [ ] Add missing citation", args3[0][1])
-
+    @patch("paper_authoring.workflow.PaperAuthoring.close_issue")
     @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
-    def test_approve_triage_stores_urls_in_dashboard(self, mock_create):
-        mock_create.side_effect = [
-            "https://github.com/owner/repo/issues/1",
-            "https://github.com/owner/repo/issues/2",
-            "https://github.com/owner/repo/issues/3",
-        ]
-        workflow = self._make_workflow_with_tasks()
-        workflow.approve_triage()
-        dashboard = workflow._read_dashboard()
+    @patch("paper_authoring.workflow.PaperAuthoring._read_issue_body")
+    @patch("paper_authoring.workflow.PaperAuthoring.get_repo")
+    def test_approve_triage_closes_review_issue(self, mock_repo, mock_read, mock_create, mock_close):
+        mock_repo.return_value = "owner/repo"
+        mock_read.return_value = "- [ ] Some finding\n"
+        mock_create.return_value = "https://github.com/owner/repo/issues/10"
+        workflow = self._make_workflow_in_triage()
+        workflow.approve_triage("5")
+        mock_close.assert_called_once_with("https://github.com/owner/repo/issues/5")
 
-        self.assertIn("[issue](https://github.com/owner/repo/issues/1)", dashboard)
-        self.assertIn("[issue](https://github.com/owner/repo/issues/2)", dashboard)
-        self.assertIn("[issue](https://github.com/owner/repo/issues/3)", dashboard)
-
+    @patch("paper_authoring.workflow.PaperAuthoring.close_issue")
     @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
-    def test_approve_triage_transitions_to_idle(self, mock_create):
-        mock_create.return_value = "https://github.com/owner/repo/issues/1"
-        workflow = self._make_workflow_with_tasks()
-        workflow.approve_triage()
+    @patch("paper_authoring.workflow.PaperAuthoring._read_issue_body")
+    @patch("paper_authoring.workflow.PaperAuthoring.get_repo")
+    def test_approve_triage_transitions_to_idle(self, mock_repo, mock_read, mock_create, mock_close):
+        mock_repo.return_value = "owner/repo"
+        mock_read.return_value = ""
+        workflow = self._make_workflow_in_triage()
+        workflow.approve_triage("5")
         self.assertEqual(workflow.read_state()["phase"], "idle")
 
+    @patch("paper_authoring.workflow.PaperAuthoring.close_issue")
     @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
-    def test_approve_triage_no_tasks_creates_no_issues(self, mock_create):
-        """If no tasks in To Do, no issues created but triage completes."""
-        workflow = self._make_workflow()
-        workflow.begin_triage()
-        workflow.approve_triage()
+    @patch("paper_authoring.workflow.PaperAuthoring._read_issue_body")
+    @patch("paper_authoring.workflow.PaperAuthoring.get_repo")
+    def test_approve_triage_empty_review_creates_no_issues(self, mock_repo, mock_read, mock_create, mock_close):
+        mock_repo.return_value = "owner/repo"
+        mock_read.return_value = "All items addressed.\n"
+        workflow = self._make_workflow_in_triage()
+        workflow.approve_triage("5")
         mock_create.assert_not_called()
-        self.assertEqual(workflow.read_state()["phase"], "idle")
 
+    @patch("paper_authoring.workflow.PaperAuthoring.close_issue")
     @patch("paper_authoring.workflow.PaperAuthoring.create_issue")
-    def test_structural_entries_get_only_their_own_issue_url(self, mock_create):
-        """Each structural entry should have exactly one [issue] link."""
-        mock_create.side_effect = [
-            "https://github.com/owner/repo/issues/1",  # structural s-1
-            "https://github.com/owner/repo/issues/2",  # structural s-2
-            "https://github.com/owner/repo/issues/3",  # minor batch
-        ]
-        workflow = self._make_workflow_with_tasks()
-        workflow.approve_triage()
-        dashboard = workflow._read_dashboard()
-
-        # Each structural entry should have exactly one [issue] link
-        structural_lines = [
-            l for l in dashboard.split("\n")
-            if "Fix introduction argument" in l or "Restructure related work" in l
-        ]
-        for line in structural_lines:
-            count = line.count("[issue]")
-            self.assertEqual(count, 1, f"Expected exactly 1 [issue] link: {line}")
-
-        # Structural entries should have their own URLs, not the minor batch URL
-        self.assertIn("issues/1", structural_lines[0])
-        self.assertIn("issues/2", structural_lines[1])
-        self.assertNotIn("issues/3", structural_lines[0])
-        self.assertNotIn("issues/3", structural_lines[1])
+    @patch("paper_authoring.workflow.PaperAuthoring._read_issue_body")
+    @patch("paper_authoring.workflow.PaperAuthoring.get_repo")
+    def test_approve_triage_skips_checked_items(self, mock_repo, mock_read, mock_create, mock_close):
+        mock_repo.return_value = "owner/repo"
+        mock_read.return_value = (
+            "- [ ] Accepted finding\n"
+            "- [x] Rejected finding\n"
+            "- [ ] Another accepted\n"
+        )
+        mock_create.side_effect = ["url1", "url2"]
+        workflow = self._make_workflow_in_triage()
+        workflow.approve_triage("5")
+        self.assertEqual(mock_create.call_count, 2)
+        self.assertEqual(mock_create.call_args_list[0][0][0], "Accepted finding")
+        self.assertEqual(mock_create.call_args_list[1][0][0], "Another accepted")
 
