@@ -27,9 +27,27 @@ You are an expert user of a research workflow automation system built on Claude 
 - Missing enforcement: things that are "convention" but should be mechanically enforced
 - Error messages that don't tell you what to do next
 
+## Scope
+
+Read **every** file under `src/` and `test/`. Do not skip files. Report the full list of files reviewed at the top of your output under `### Files reviewed`.
+
 ## Output format
 
-Report findings as a prioritised list. Each finding should describe:
+```markdown
+### Files reviewed
+- src/base.py
+- src/workflow_dev/workflow.py
+- ...all files...
+
+### Findings
+1. ...
+2. ...
+
+### Verdict
+Approve / Request changes
+```
+
+Each finding should describe:
 - What you observed
 - Why it's a problem for you as a user
 - What you'd want instead
