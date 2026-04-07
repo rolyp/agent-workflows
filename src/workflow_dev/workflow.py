@@ -50,7 +50,6 @@ CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
 CMD_REOPEN_ISSUE = "reopen-issue"
-CMD_SUSPEND_PROTOCOL = "suspend-protocol"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
 
@@ -546,12 +545,6 @@ class WorkflowDev(Workflow):
 
     # --- Protocol suspension ---
 
-    def suspend_protocol(self) -> None:
-        """Suspend protocol mode. Only for human use via ! prefix."""
-        sf = self._read_state_file()
-        sf["protocol_suspended"] = True
-        self._write_state_file(sf)
-
     def resume_protocol(self) -> None:
         """Resume protocol mode."""
         sf = self._read_state_file()
@@ -784,9 +777,6 @@ def main() -> None:
         issue_url = f"https://github.com/{repo}/issues/{args[0]}"
         wd.reopen_issue(issue_url)
         print(f"Reopened: issue #{args[0]}")
-    elif command == CMD_SUSPEND_PROTOCOL:
-        wd.suspend_protocol()
-        print("Protocol suspended. Resume with: workflow.py resume-protocol")
     elif command == CMD_RESUME_PROTOCOL:
         wd.resume_protocol()
         print("Protocol resumed.")
