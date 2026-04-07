@@ -4,7 +4,7 @@
 Each method reads current state from disk, performs its operation, and writes
 back. No in-memory state is cached between calls.
 
-State is externalised to workflow/state.json and reported in the dashboard.
+State is externalised to workflow/state.json.
 """
 
 import glob
@@ -33,13 +33,12 @@ REVIEW_END = "\\reviewend"
 CHANGE_MARKUP = ("\\added", "\\deleted", "\\replaced")
 
 # Files managed exclusively by PaperAuthoring (block direct Edit)
-PROTECTED_FILES = ("workflow/dashboard.md", "workflow/todo/completed.md", "workflow/state.json")
+PROTECTED_FILES = ("workflow/state.json",)
 
 # CLI command names
 CMD_STARTUP = "startup"
 CMD_BEGIN_TRIAGE = "begin-triage"
 CMD_RECLASSIFY = "reclassify"
-CMD_ADD_TASK = "add-task"
 CMD_APPROVE_TRIAGE = "approve-triage"
 CMD_BEGIN_TASK = "begin-task"
 CMD_BEGIN_AD_HOC = "begin-ad-hoc"
@@ -81,14 +80,12 @@ class PaperAuthoring(Workflow):
 
     def __init__(self, project_root: Path):
         self.root = project_root
-        self.dashboard_path = project_root / "workflow" / "dashboard.md"
         self.structural_path = project_root / "workflow" / "todo" / "structural.md"
-        self.completed_path = project_root / "workflow" / "todo" / "completed.md"
         self.state_path = project_root / "workflow" / "state.json"
 
         # Preconditions: workflow files must exist
         missing = []
-        for path in (self.dashboard_path, self.structural_path, self.completed_path):
+        for path in (self.structural_path,):
             if not path.exists():
                 missing.append(str(path.relative_to(self.root)))
         if missing:
@@ -97,20 +94,15 @@ class PaperAuthoring(Workflow):
         self._init_state(Phase.IDLE)
     
 
-        # Ensure dashboard reflects current state
-        self._update_in_progress()
         self.assert_valid()
 
     # --- Invariants ---
 
     def assert_valid(self) -> None:
         errors = []
-        dashboard = self._read_dashboard()
         errors += self._state_file_exists()
-        errors += self._at_most_one_in_progress(dashboard)
-        errors += self._no_orphaned_markers(dashboard)
+        errors += self._no_orphaned_markers()
         errors += self._markers_do_not_coexist()
-        errors += self._progress_counts_consistent(dashboard)
         errors += self._state_consistent_with_markers()
         if errors:
             raise ValidationError(errors)
@@ -120,46 +112,21 @@ class PaperAuthoring(Workflow):
             return ["workflow/state.json does not exist"]
         return []
 
-    def _at_most_one_in_progress(self, dashboard: str) -> list[str]:
-        n = self._count_in_progress(dashboard)
-        if n > 1:
-            return [f"Multiple in-progress tasks ({n}) — expected at most 1"]
-        return []
-
-    def _no_orphaned_markers(self, dashboard: str) -> list[str]:
-        if self._count_in_progress(dashboard) > 0:
+    def _no_orphaned_markers(self) -> list[str]:
+        phase = self._read_phase()
+        if phase not in (Phase.IDLE, Phase.TRIAGE):
             return []
         errors = []
         if self._tex_files_containing(EDIT_START):
-            errors.append(f"Orphaned {EDIT_START} markers but no in-progress task")
+            errors.append(f"State is '{phase.value}' but {EDIT_START} markers found in .tex files")
         if self._tex_files_containing(REVIEW_START):
-            errors.append(f"Orphaned {REVIEW_START} markers but no in-progress task")
+            errors.append(f"State is '{phase.value}' but {REVIEW_START} markers found in .tex files")
         return errors
 
     def _markers_do_not_coexist(self) -> list[str]:
         if self._tex_files_containing(EDIT_START) and self._tex_files_containing(REVIEW_START):
             return [f"Both {EDIT_START} and {REVIEW_START} markers present — should not coexist"]
         return []
-
-    def _progress_counts_consistent(self, dashboard: str) -> list[str]:
-        errors = []
-        for kind in ("minor", "structural"):
-            match = re.search(
-                rf"Completed {kind}.*?\((\d+) of (\d+)\)", dashboard, re.IGNORECASE
-            )
-            if not match:
-                continue
-            done = int(match.group(1))
-            total = int(match.group(2))
-            todo = self._count_section_items(dashboard, kind.capitalize())
-            in_prog = self._count_in_progress_for_kind(dashboard, kind)
-            expected = done + in_prog + todo
-            if total != expected:
-                errors.append(
-                    f"{kind} count mismatch: header says {done} of {total}, "
-                    f"but {done} done + {in_prog} in-progress + {todo} to-do = {expected}"
-                )
-        return errors
 
     def _state_consistent_with_markers(self) -> list[str]:
         phase = self._read_phase()
@@ -207,63 +174,10 @@ class PaperAuthoring(Workflow):
 
     def _save_stack(self, stack: list[dict], history: list[dict] | None = None,
                     validate: bool = True) -> None:
-        """Write stack, update dashboard, optionally validate."""
+        """Write stack, optionally validate."""
         super()._save_stack(stack, history=history, validate=validate)
-        self._update_in_progress()
         if validate:
             self.assert_valid()
-
-    # --- Dashboard rendering ---
-
-    def _render_in_progress(self) -> str:
-        """Render the In Progress section from the state stack."""
-        stack = self._read_stack()
-        if not stack or stack[0].get("phase") == Phase.IDLE.value:
-            return "(none)"
-        # Bottom frame is the root task
-        root = stack[0]
-        lines = []
-        # Determine if root is the active leaf (no children on stack)
-        root_is_leaf = len(stack) == 1
-        prefix = "🔵 " if root_is_leaf else ""
-        # Render root task line
-        desc = root.get("description", root.get("task", "unknown"))
-        note_link = root.get("note_link")
-        plan_link = root.get("plan_link")
-        line = f"- {prefix}{desc}"
-        if note_link:
-            line += f" ([note]({note_link}))"
-        if plan_link:
-            line += f" · [plan]({plan_link})"
-        lines.append(line)
-        # Render subtasks
-        subtasks = root.get("subtasks", [])
-        for st in subtasks:
-            completed = st.get("completed", False)
-            st_is_active = any(
-                f.get("task") == st["id"] for f in stack[1:]
-            )
-            if completed:
-                lines.append(f"  - [x] {st['description']} (subtask: {st['id']})")
-            elif st_is_active:
-                lines.append(f"  - 🔵 {st['description']} (subtask: {st['id']})")
-            else:
-                lines.append(f"  - [ ] {st['description']} (subtask: {st['id']})")
-        return "\n".join(lines)
-
-    def _update_in_progress(self) -> None:
-        """Regenerate the In Progress section of the dashboard from state."""
-        if not self.dashboard_path.exists():
-            return
-        dashboard = self._read_dashboard()
-        rendered = self._render_in_progress()
-        # Replace the In Progress section
-        dashboard = re.sub(
-            r"(## In progress\n\n).*?(?=\n## )",
-            f"\\1{rendered}\n",
-            dashboard, flags=re.DOTALL,
-        )
-        self.dashboard_path.write_text(dashboard)
 
     # --- Triage commands ---
 
@@ -293,111 +207,49 @@ class PaperAuthoring(Workflow):
         target_text = target_path.read_text().rstrip()
         target_path.write_text(target_text + "\n\n" + note_block + "\n")
 
-    def add_task(self, note_id: str, description: str, kind: str) -> None:
-        """Add a task to the dashboard To do section.
+    def approve_triage(self, review_issue_number: str) -> None:
+        """Exit triage. Promotes accepted findings from review issue to standalone issues.
 
-        kind must be 'structural' or 'minor'.
-        note_id is used to generate the link to the notes file.
+        Closes the review issue after promotion.
         """
-        assert kind in ("structural", "minor"), f"Invalid kind: {kind}"
-        dashboard = self._read_dashboard()
-
-        # Reject duplicates
-        anchor = f"#note-{note_id})"
-        if anchor in dashboard:
-            raise ValueError(f"Task '{note_id}' already exists in dashboard")
-
-        notes_file = "structural.md" if kind == "structural" else "minor-issues.md"
-        link = f"[note](todo/{notes_file}#note-{note_id})"
-        entry = f"- {description} ({link})"
-
-        # Insert under the appropriate ### heading
-        section = kind.capitalize()
-        pattern = rf"(^### {section}$\n\n)(.*?)(?=^### |\Z)"
-        match = re.search(pattern, dashboard, re.MULTILINE | re.DOTALL)
-        if not match:
-            raise ValueError(f"Section '### {section}' not found in dashboard")
-
-        existing = match.group(2).strip()
-        if existing == "(none)":
-            new_items = entry + "\n\n"
-        else:
-            new_items = existing + "\n" + entry + "\n\n"
-
-        dashboard = dashboard[:match.start(2)] + new_items + dashboard[match.end(2):]
-
-        # Update count
-        count_pattern = rf"(Completed {kind}.*?\(\d+ of )(\d+)\)"
-        count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
-        if count_match:
-            old_total = int(count_match.group(2))
-            dashboard = dashboard[:count_match.start(2)] + str(old_total + 1) + ")" + dashboard[count_match.end():]
-
-        self.dashboard_path.write_text(dashboard)
-
-    def approve_triage(self) -> None:
-        """Exit triage, enter idle. Creates GitHub Issues for all To Do tasks."""
-        self.create_github_issues()
+        findings = self.parse_review_issue(review_issue_number)
+        self.promote_findings(findings)
+        repo = self.get_repo()
+        review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
+        self.close_issue(review_url)
         self._write_state(Phase.IDLE)
 
     # --- Task selection ---
 
     AD_HOC = "Ad hoc"
 
-    def begin_task(self, task_ref: str, regions: list[tuple[str, str]]) -> None:
-        """Select a task; move to In Progress; place edit bars.
+    def begin_task(self, issue_number: str, regions: list[tuple[str, str]]) -> None:
+        """Select a task by issue number; move to In Progress; place edit bars.
 
-        task_ref: either a note_id (reads from dashboard) or an issue number
-        (reads from GitHub). Numeric strings are treated as issue numbers.
+        issue_number: GitHub issue number.
         regions: list of (file_path, passage) pairs to place edit bars around.
         """
         if not regions:
             raise ValueError("At least one edit region required")
 
-        issue_url: str | None = None
-        note_link: str | None = None
-
-        if task_ref.isdigit():
-            # Issue-based: read from GitHub
-            repo = self.get_repo()
-            issue_url = f"https://github.com/{repo}/issues/{task_ref}"
-            env = self._gh_env()
-            result = subprocess.run(
-                ["gh", "issue", "view", task_ref, "--repo", repo,
-                 "--json", "title", "--jq", ".title"],
-                capture_output=True, text=True, env=env,
-            )
-            if result.returncode != 0:
-                raise ValueError(f"Issue #{task_ref} not found: {result.stderr}")
-            description = result.stdout.strip()
-            note_id = task_ref
-            note_link = None
-        else:
-            # Note-based: read from dashboard (legacy)
-            note_id = task_ref
-            dashboard = self._read_dashboard()
-            pattern = rf"^- .+#note-{re.escape(note_id)}\).*$"
-            match = re.search(pattern, dashboard, re.MULTILINE)
-            if not match:
-                raise ValueError(f"Task '{note_id}' not found in To do")
-            task_line = match.group(0)
-            desc_match = re.match(r"^- (.+?) \(\[note\]\((.+?)\)\)(.*)$", task_line)
-            description = desc_match.group(1) if desc_match else task_line[2:]
-            note_link = desc_match.group(2) if desc_match else None
-            suffix = desc_match.group(3) if desc_match else ""
-            issue_match = re.search(r"\[issue\]\((.+?)\)", suffix)
-            issue_url = issue_match.group(1) if issue_match else None
-            # Remove from To do
-            dashboard = dashboard.replace(task_line + "\n", "")
-            self.dashboard_path.write_text(dashboard)
+        repo = self.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+        env = self._gh_env()
+        result = subprocess.run(
+            ["gh", "issue", "view", issue_number, "--repo", repo,
+             "--json", "title", "--jq", ".title"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise ValueError(f"Issue #{issue_number} not found: {result.stderr}")
+        description = result.stdout.strip()
 
         # Place edit bars
         for file_path, passage in regions:
             self._place_bars(file_path, passage, EDIT_START, EDIT_END)
         # Update state
-        self._write_state(Phase.EDIT, note_id, regions=regions,
-                          description=description, note_link=note_link,
-                          issue_url=issue_url)
+        self._write_state(Phase.EDIT, issue_number, regions=regions,
+                          description=description, issue_url=issue_url)
         # Update GitHub
         if issue_url:
             try:
@@ -494,45 +346,39 @@ class PaperAuthoring(Workflow):
                     self.close_issue(issue_url)
                 except Exception:
                     pass
-            self._increment_done_count()
             self._write_state(Phase.IDLE)
-
-    def _increment_done_count(self) -> None:
-        """Increment the completed count for the current task's kind."""
-        state = self.read_state()
-        note_link = state.get("note_link")
-        if not note_link:
-            return  # issue-based task, no dashboard count to update
-        kind = "minor" if "minor-issues.md" in str(note_link) else "structural"
-        dashboard = self._read_dashboard()
-        count_pattern = rf"(Completed {kind}.*?\()(\d+)( of \d+\))"
-        count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
-        if count_match:
-            old_done = int(count_match.group(2))
-            dashboard = (dashboard[:count_match.start(2)]
-                       + str(old_done + 1)
-                       + dashboard[count_match.end(2):])
-            self.dashboard_path.write_text(dashboard)
 
     # --- Subtasks ---
 
-    def add_subtask(self, subtask_id: str, description: str) -> None:
+    def add_subtask(self, subtask_id: str, description: str,
+                    issue_number: str | None = None) -> None:
         """Add a subtask under the current in-progress task.
 
-        Creates a GitHub sub-issue if the parent task has an issue URL.
+        If issue_number is provided, links that existing issue as a sub-issue.
+        Otherwise creates a new sub-issue if the parent task has an issue URL.
         """
         state = self.read_state()
         parent_url = state.get("issue_url")
         sf = self._read_state_file()
         frame = sf["stack"][-1]
         subtask_entry: dict[str, object] = {"id": subtask_id, "description": description}
-        # Create GitHub sub-issue if parent has one
-        if parent_url:
+        if issue_number:
+            # Link existing issue
+            try:
+                repo = self.get_repo()
+                sub_url = f"https://github.com/{repo}/issues/{issue_number}"
+                if parent_url:
+                    self.create_sub_issue(parent_url, sub_url)
+                subtask_entry["issue_url"] = sub_url
+            except Exception as e:
+                print(f"GitHub operation failed: {e}", file=sys.stderr)
+        elif parent_url:
+            # Create new sub-issue
             try:
                 sub_url = self.create_sub_issue(parent_url, description)
                 subtask_entry["issue_url"] = sub_url
             except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)  # best-effort
+                print(f"GitHub operation failed: {e}", file=sys.stderr)
         subtasks = list(frame.get("subtasks", []))
         subtasks.append(subtask_entry)
         frame["subtasks"] = subtasks
@@ -792,29 +638,8 @@ class PaperAuthoring(Workflow):
         return any(text in region for region in regions)
 
 
-    def _count_in_progress_for_kind(self, dashboard: str, kind: str) -> int:
-        """Count in-progress items of the given kind from the state stack."""
-        stack = self._read_stack()
-        if not stack or stack[0].get("phase") == Phase.IDLE.value:
-            return 0
-        note_link = str(stack[0].get("note_link", ""))
-        if kind == "minor":
-            return 1 if "minor-issues.md" in note_link else 0
-        else:
-            return 1 if "structural.md" in note_link else 0
-
     def _minor_issues_path(self) -> Path:
         return self.root / "workflow" / "todo" / "minor-issues.md"
-
-    def _read_dashboard(self) -> str:
-        return self.dashboard_path.read_text()
-
-    def _count_in_progress(self, dashboard: str) -> int:
-        """Count in-progress tasks from the state stack."""
-        stack = self._read_stack()
-        if not stack or stack[0].get("phase") == Phase.IDLE.value:
-            return 0
-        return 1
 
     def _tex_files_containing(self, pattern: str) -> list[str]:
         return [
@@ -823,87 +648,37 @@ class PaperAuthoring(Workflow):
             if pattern in Path(f).read_text()
         ]
 
-    def _count_section_items(self, dashboard: str, section: str) -> int:
-        match = re.search(
-            rf"^### {section}$\n(.*?)(?=^### |\Z)",
-            dashboard, re.MULTILINE | re.DOTALL,
-        )
-        if not match:
-            return 0
-        return len(re.findall(r"^- ", match.group(1), re.MULTILINE))
-
     # --- GitHub Issues integration ---
 
-    def _parse_todo_tasks(self, dashboard: str, section: str) -> list[dict]:
-        """Parse tasks from a dashboard To Do section.
+    def parse_review_issue(self, issue_number: str) -> list[tuple[str, str]]:
+        """Parse accepted findings from a review issue's checklist.
 
-        Returns list of {description, note_id, note_file} dicts.
+        Returns list of (title, body) pairs for unchecked items.
+        Checked/strikethrough items are treated as rejected.
         """
-        pattern = rf"^### {section}$\n\n(.*?)(?=\n### |\Z)"
-        match = re.search(pattern, dashboard, re.MULTILINE | re.DOTALL)
-        if not match:
-            return []
-        content = match.group(1).strip()
-        if content == "(none)":
-            return []
-        tasks = []
-        for line in content.split("\n"):
-            m = re.match(
-                r"^- (.+?) \(\[note\]\(todo/(.*?)#note-(.*?)\)\)(.*)$", line
-            )
-            if m:
-                tasks.append({
-                    "description": m.group(1),
-                    "note_file": m.group(2),
-                    "note_id": m.group(3),
-                    "suffix": m.group(4),  # preserve any trailing text
-                })
-        return tasks
+        repo = self.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+        body = self._read_issue_body(issue_url)
+        findings = []
+        for line in body.split("\n"):
+            line = line.strip()
+            if line.startswith("- [ ] "):
+                description = line[6:].strip()
+                findings.append((description, f"From review issue #{issue_number}"))
+        return findings
 
-    def _read_note_body(self, note_file: str, note_id: str) -> str:
-        """Read the body of a note from structural.md or minor-issues.md."""
-        path = self.root / "workflow" / "todo" / note_file
-        if not path.exists():
-            return ""
-        text = path.read_text()
-        pattern = rf"### Note {re.escape(note_id)}\n(.*?)(?=\n### |\Z)"
-        match = re.search(pattern, text, re.DOTALL)
-        return match.group(1).strip() if match else ""
+    def promote_findings(self, findings: list[tuple[str, str]]) -> list[str]:
+        """Create a standalone issue for each finding.
 
-    def _format_dashboard_entry(self, task: dict, issue_url: str | None = None) -> str:
-        """Format a dashboard entry line from a parsed task dict."""
-        entry = (
-            f"- {task['description']} "
-            f"([note](todo/{task['note_file']}#note-{task['note_id']}))"
-        )
-        if issue_url:
-            entry += f" · [issue]({issue_url})"
-        entry += task["suffix"]
-        return entry
+        findings: list of (title, body) pairs.
+        Returns list of created issue URLs.
+        """
+        urls = []
+        for title, body in findings:
+            url = self.create_issue(title, body)
+            urls.append(url)
+        return urls
 
-    def create_github_issues(self) -> None:
-        """Create GitHub Issues for all To Do tasks and store URLs in dashboard."""
-        dashboard = self._read_dashboard()
-
-        # Structural tasks: one issue each
-        for task in self._parse_todo_tasks(dashboard, "Structural"):
-            body = self._read_note_body(task["note_file"], task["note_id"])
-            url = self.create_issue(task["description"], body)
-            old_entry = self._format_dashboard_entry(task)
-            new_entry = self._format_dashboard_entry(task, issue_url=url)
-            dashboard = dashboard.replace(old_entry, new_entry, 1)
-
-        # Minor tasks: single issue with checkbox list
-        minor_tasks = self._parse_todo_tasks(dashboard, "Minor")
-        if minor_tasks:
-            body_lines = [f"- [ ] {t['description']}" for t in minor_tasks]
-            url = self.create_issue("Minor issues", "\n".join(body_lines))
-            for task in minor_tasks:
-                old_entry = self._format_dashboard_entry(task)
-                new_entry = self._format_dashboard_entry(task, issue_url=url)
-                dashboard = dashboard.replace(old_entry, new_entry, 1)
-
-        self.dashboard_path.write_text(dashboard)
 
 
 # --- CLI entry point ---
@@ -945,15 +720,12 @@ def main() -> None:
             sys.exit(1)
         workflow.reclassify(sys.argv[2], sys.argv[3])
         print(f"Reclassified {sys.argv[2]} → {sys.argv[3]}")
-    elif command == CMD_ADD_TASK:
-        if len(sys.argv) < 5:
-            print(f"Usage: workflow.py {CMD_ADD_TASK} <note-id> <description> <structural|minor>", file=sys.stderr)
-            sys.exit(1)
-        workflow.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
-        print(f"Added {sys.argv[4]} task: {sys.argv[3]}")
     elif command == CMD_APPROVE_TRIAGE:
-        workflow.approve_triage()
-        print("Triage complete; entering idle")
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_APPROVE_TRIAGE} <review-issue-number>", file=sys.stderr)
+            sys.exit(1)
+        workflow.approve_triage(sys.argv[2])
+        print(f"Triage complete; review issue #{sys.argv[2]} closed")
     elif command == CMD_BEGIN_TASK:
         if len(sys.argv) < 4:
             print(f"Usage: workflow.py {CMD_BEGIN_TASK} <note-id> <regions-json>", file=sys.stderr)

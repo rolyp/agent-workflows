@@ -49,6 +49,7 @@ CMD_SUBMIT_REVIEW = "submit-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
+CMD_REOPEN_ISSUE = "reopen-issue"
 CMD_SUSPEND_PROTOCOL = "suspend-protocol"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
@@ -69,9 +70,7 @@ class WorkflowDev(Workflow):
     def __init__(self, project_root: Path):
         self.root = project_root
         self.state_path = project_root / "state.json"
-        self.dashboard_path = project_root / "dashboard.md"
         self._init_state(Phase.IDLE)
-        self._update_dashboard()
 
     def _phase_enum(self) -> type[Phase]:
         return Phase
@@ -120,7 +119,7 @@ class WorkflowDev(Workflow):
         self._set_label(self._label_for_state(self.read_state()))
         return result
 
-    # --- Dashboard ---
+    # --- State rendering (for startup) ---
 
     def _render_state(self) -> str:
         """Render current state as a human-readable string."""
@@ -145,25 +144,6 @@ class WorkflowDev(Workflow):
         if review_of:
             parts.append(f"reviewing: {review_of}")
         return " · ".join(parts)
-
-    def _update_dashboard(self) -> None:
-        """Regenerate the Current state section of the dashboard."""
-        if not self.dashboard_path.exists():
-            return
-        dashboard = self.dashboard_path.read_text()
-        rendered = self._render_state()
-        dashboard = re.sub(
-            r"(## Current state\n\n<!-- .* -->\n\n).*?(?=\n## |\Z)",
-            f"\\1{rendered}\n",
-            dashboard, flags=re.DOTALL,
-        )
-        self.dashboard_path.write_text(dashboard)
-
-    def _save_stack(self, stack: list[dict], history: list[dict] | None = None,
-                    validate: bool = True) -> None:
-        """Write stack and update dashboard."""
-        super()._save_stack(stack, history=history, validate=validate)
-        self._update_dashboard()
 
     # --- Commands ---
 
@@ -235,9 +215,9 @@ class WorkflowDev(Workflow):
         phase = self._read_phase()
         if phase not in (Phase.REFACTORING, Phase.MODIFYING):
             raise ValueError(f"begin-step not available in {phase.value}. Use begin-task first.")
-        # Require clean working tree (excluding state.json and dashboard.md which are workflow-managed)
+        # Require clean working tree (excluding state.json which is workflow-managed)
         status = subprocess.run(
-            ["git", "status", "--porcelain", "--", ".", ":!state.json", ":!dashboard.md"],
+            ["git", "status", "--porcelain", "--", ".", ":!state.json"],
             capture_output=True, text=True, cwd=self.root,
         )
         if status.stdout.strip():
@@ -795,6 +775,15 @@ def main() -> None:
             sys.exit(1)
         url = wd.create_issue(args[0], args[1])
         print(f"Created: {url}")
+    elif command == CMD_REOPEN_ISSUE:
+        args = sys.argv[2:]
+        if len(args) < 1:
+            print(f"Usage: workflow.py {CMD_REOPEN_ISSUE} <issue-number>", file=sys.stderr)
+            sys.exit(1)
+        repo = wd.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{args[0]}"
+        wd.reopen_issue(issue_url)
+        print(f"Reopened: issue #{args[0]}")
     elif command == CMD_SUSPEND_PROTOCOL:
         wd.suspend_protocol()
         print("Protocol suspended. Resume with: workflow.py resume-protocol")

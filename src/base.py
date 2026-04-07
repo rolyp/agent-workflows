@@ -352,6 +352,18 @@ class Workflow(ABC):
         if result.returncode != 0:
             raise RuntimeError(f"Failed to close issue: {result.stderr}")
 
+    def reopen_issue(self, issue_url: str) -> None:
+        """Reopen a closed issue and set project status to In Progress."""
+        env = self._gh_env()
+        number = self._get_issue_number(issue_url)
+        result = subprocess.run(
+            ["gh", "issue", "reopen", number, "--repo", self.get_repo()],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to reopen issue: {result.stderr}")
+        self.set_issue_status(issue_url, "In Progress")
+
     # --- Issue label management ---
 
     # Subclasses must define their own labels and WORKFLOW_LABELS tuple.
