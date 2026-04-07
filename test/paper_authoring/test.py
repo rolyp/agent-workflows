@@ -3,7 +3,6 @@
 
 import json
 import os
-import re
 import shutil
 import tempfile
 import unittest
@@ -15,53 +14,6 @@ from paper_authoring.workflow import (
     PaperAuthoring, ValidationError,
 )
 
-TEMPLATE_PATH = Path(__file__).parent.parent.parent / "src" / "paper_authoring" / "templates" / "dashboard.md"
-
-
-def _make_dashboard(
-    structural_tasks: list[str] | None = None,
-    minor_tasks: list[str] | None = None,
-    in_progress: list[str] | None = None,
-) -> str:
-    """Build a dashboard from the template, injecting tasks."""
-    dashboard = TEMPLATE_PATH.read_text()
-    structural = structural_tasks or []
-    minor = minor_tasks or []
-    ip = in_progress or []
-
-    dashboard = dashboard.replace(
-        "minor issues](todo/completed.md#minor) (0 of 0)",
-        f"minor issues](todo/completed.md#minor) (0 of {len(minor)})",
-    )
-    dashboard = dashboard.replace(
-        "structural tasks](todo/completed.md#structural) (0 of 0)",
-        f"structural tasks](todo/completed.md#structural) (0 of {len(structural)})",
-    )
-
-    if ip:
-        dashboard = dashboard.replace(
-            "## In progress\n\n(none)",
-            "## In progress\n\n" + "\n".join(ip),
-        )
-
-    if structural:
-        dashboard = re.sub(
-            r"(### Structural\n\n)(.*?)$",
-            "\\1" + "\n".join(f"- {t}" for t in structural) + "\n",
-            dashboard,
-            flags=re.DOTALL,
-        )
-
-    if minor:
-        dashboard = re.sub(
-            r"(### Minor\n\n)\(none\)",
-            "\\1" + "\n".join(f"- {t}" for t in minor),
-            dashboard,
-        )
-
-    return dashboard
-
-
 class TestFixture(unittest.TestCase):
     def setUp(self):
         self.orig_dir = os.getcwd()
@@ -72,12 +24,9 @@ class TestFixture(unittest.TestCase):
         os.chdir(self.orig_dir)
         shutil.rmtree(self.test_dir)
 
-    def _write_workflow_files(self, dashboard: str | None = None):
+    def _write_workflow_files(self):
         (self.test_dir / "workflow" / "todo").mkdir(parents=True, exist_ok=True)
         (self.test_dir / "sec").mkdir(exist_ok=True)
-        (self.test_dir / "workflow" / "dashboard.md").write_text(
-            dashboard or _make_dashboard(structural_tasks=["Task one", "Task two"])
-        )
         (self.test_dir / "workflow" / "todo" / "structural.md").write_text(
             "# Structural Review Notes\n"
         )
@@ -85,8 +34,8 @@ class TestFixture(unittest.TestCase):
             "# Completed\n\n## Minor\n\n## Structural\n"
         )
 
-    def _make_workflow(self, dashboard: str | None = None) -> PaperAuthoring:
-        self._write_workflow_files(dashboard)
+    def _make_workflow(self) -> PaperAuthoring:
+        self._write_workflow_files()
         return PaperAuthoring(self.test_dir)
 
 
@@ -109,13 +58,6 @@ class ConstructorTest(TestFixture):
         # Need edit bars for edit phase to be valid
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{EDIT_START} text {EDIT_END}\n"
-        )
-        # Need an in-progress task in dashboard
-        (self.test_dir / "workflow" / "dashboard.md").write_text(
-            _make_dashboard(
-                structural_tasks=["Task one", "Task two"],
-                in_progress=["- 🔵 My task"],
-            )
         )
         workflow = PaperAuthoring(self.test_dir)
         state = workflow.read_state()
@@ -147,10 +89,7 @@ class InvariantTest(TestFixture):
         self.assertTrue(any("idle" in e and "markers" in e for e in ctx.exception.errors))
 
     def test_coexisting_markers(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "a.tex").write_text(f"{EDIT_START} text {EDIT_END}\n")
         (self.test_dir / "sec" / "b.tex").write_text(f"{REVIEW_START} text {REVIEW_END}\n")
         with self.assertRaises(ValidationError) as ctx:
@@ -160,10 +99,7 @@ class InvariantTest(TestFixture):
 
 class StateTest(TestFixture):
     def test_edit_to_review_sets_review_phase(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{EDIT_START} text {EDIT_END}\n"
         )
@@ -173,10 +109,7 @@ class StateTest(TestFixture):
         self.assertEqual(state["phase"], "author-review")
 
     def test_review_to_edit_sets_edit_phase(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{REVIEW_START} text {REVIEW_END}\n"
         )
@@ -187,10 +120,7 @@ class StateTest(TestFixture):
 
 class EditToReviewTest(TestFixture):
     def test_swaps_edit_to_review(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
+        workflow = self._make_workflow()
         tex = self.test_dir / "sec" / "test.tex"
         tex.write_text(f"before {EDIT_START} middle {EDIT_END} after\n")
         workflow._write_state(Phase.EDIT, "Active task")
@@ -202,10 +132,7 @@ class EditToReviewTest(TestFixture):
 
 class ReviewToEditTest(TestFixture):
     def test_swaps_review_to_edit(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
+        workflow = self._make_workflow()
         tex = self.test_dir / "sec" / "test.tex"
         tex.write_text(f"before {REVIEW_START} middle {REVIEW_END} after\n")
         workflow._write_state(Phase.AUTHOR_REVIEW, "Active task")
@@ -229,10 +156,7 @@ class CheckEditTest(TestFixture):
         self.assertIn("begin-task", msg)
 
     def test_tex_edit_blocked_without_change_markup(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["\U0001f535 Active task"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{EDIT_START} old text {EDIT_END}\n"
         )
@@ -242,10 +166,7 @@ class CheckEditTest(TestFixture):
         self.assertIn("change markup", msg)
 
     def test_tex_edit_blocked_outside_any_bars(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["\U0001f535 Active task"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "test.tex").write_text("bare text\n")
         workflow.state_path.write_text(json.dumps([{"phase": "edit", "task": "Active task"}]) + "\n")
         allowed, msg = workflow.check_edit("sec/test.tex", "bare text", "\\deleted{bare text}")
@@ -254,10 +175,7 @@ class CheckEditTest(TestFixture):
 
     def test_tex_edit_allowed_within_review_bars_ad_hoc(self):
         """Ad hoc edit: review bars + change markup, author-review phase."""
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["\U0001f535 Ad hoc"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "test.tex").write_text(
             f"before {REVIEW_START} old text {REVIEW_END} after\n"
         )
@@ -267,10 +185,7 @@ class CheckEditTest(TestFixture):
         self.assertFalse(allowed)
 
     def test_tex_edit_allowed_within_edit_bars(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "test.tex").write_text(
             f"before {EDIT_START} editable text {EDIT_END} after\n"
         )
@@ -280,10 +195,7 @@ class CheckEditTest(TestFixture):
 
     def test_tex_edit_blocked_in_review_bars_during_edit_phase(self):
         """During edit phase, must be in edit bars, not review bars."""
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{REVIEW_START} text {REVIEW_END}\n"
         )
@@ -293,10 +205,7 @@ class CheckEditTest(TestFixture):
         self.assertIn("review bars but phase is 'edit'", msg)
 
     def test_tex_edit_blocked_during_author_review(self):
-        workflow = self._make_workflow(_make_dashboard(
-            structural_tasks=["Task one", "Task two"],
-            in_progress=["- 🔵 Active task"],
-        ))
+        workflow = self._make_workflow()
         (self.test_dir / "sec" / "test.tex").write_text(
             f"{REVIEW_START} text {REVIEW_END}\n"
         )

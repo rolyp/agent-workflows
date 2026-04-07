@@ -4,7 +4,7 @@
 Each method reads current state from disk, performs its operation, and writes
 back. No in-memory state is cached between calls.
 
-State is externalised to workflow/state.json and reported in the dashboard.
+State is externalised to workflow/state.json.
 """
 
 import glob
@@ -33,7 +33,7 @@ REVIEW_END = "\\reviewend"
 CHANGE_MARKUP = ("\\added", "\\deleted", "\\replaced")
 
 # Files managed exclusively by PaperAuthoring (block direct Edit)
-PROTECTED_FILES = ("workflow/dashboard.md", "workflow/todo/completed.md", "workflow/state.json")
+PROTECTED_FILES = ("workflow/todo/completed.md", "workflow/state.json")
 
 # CLI command names
 CMD_STARTUP = "startup"
@@ -80,14 +80,13 @@ class PaperAuthoring(Workflow):
 
     def __init__(self, project_root: Path):
         self.root = project_root
-        self.dashboard_path = project_root / "workflow" / "dashboard.md"
         self.structural_path = project_root / "workflow" / "todo" / "structural.md"
         self.completed_path = project_root / "workflow" / "todo" / "completed.md"
         self.state_path = project_root / "workflow" / "state.json"
 
         # Preconditions: workflow files must exist
         missing = []
-        for path in (self.dashboard_path, self.structural_path, self.completed_path):
+        for path in (self.structural_path, self.completed_path):
             if not path.exists():
                 missing.append(str(path.relative_to(self.root)))
         if missing:
@@ -642,9 +641,6 @@ class PaperAuthoring(Workflow):
 
     def _minor_issues_path(self) -> Path:
         return self.root / "workflow" / "todo" / "minor-issues.md"
-
-    def _read_dashboard(self) -> str:
-        return self.dashboard_path.read_text()
 
     def _tex_files_containing(self, pattern: str) -> list[str]:
         return [
