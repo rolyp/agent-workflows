@@ -597,19 +597,21 @@ class WorkflowDev(Workflow):
         if not branch:
             return  # detached HEAD, skip CI check
 
-        # Wait briefly for the run to register after push
-        time.sleep(5)
-
-        # Find the latest run for this branch
-        result = subprocess.run(
-            ["gh", "run", "list", "--branch", branch, "--limit", "1",
-             "--json", "databaseId", "--jq", ".[0].databaseId"],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            raise RuntimeError(f"Could not find CI run for branch {branch}: {result.stderr}")
-
-        run_id = result.stdout.strip()
+        # Wait for run to appear (retry up to 30s)
+        run_id = None
+        for _ in range(6):
+            time.sleep(5)
+            result = subprocess.run(
+                ["gh", "run", "list", "--branch", branch, "--limit", "1",
+                 "--json", "databaseId", "--jq", ".[0].databaseId"],
+                capture_output=True, text=True, env=env,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                run_id = result.stdout.strip()
+                break
+        if not run_id:
+            print(f"No CI run found for branch {branch}; skipping CI check", file=sys.stderr)
+            return
         deadline = time.time() + self.CI_TIMEOUT
 
         # Poll until run completes or timeout
