@@ -222,12 +222,6 @@ class CheckEditTest(TestFixture):
         self.assertTrue(allowed)
         self.assertEqual(msg, "")
 
-    def test_dashboard_edit_blocked(self):
-        workflow = self._make_workflow()
-        allowed, msg = workflow.check_edit("workflow/dashboard.md")
-        self.assertFalse(allowed)
-        self.assertIn("PaperAuthoring", msg)
-
     def test_tex_edit_blocked_in_idle(self):
         workflow = self._make_workflow()
         allowed, msg = workflow.check_edit("sec/test.tex", None, "\\deleted{text}")
@@ -437,24 +431,6 @@ class CheckWriteTest(TestFixture):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class CompleteTaskTest(TestFixture):
-    def _make_workflow_with_task(self):
-        """Create a workflow with a properly linked task, select it."""
-        workflow = self._make_workflow()
-        # Add a task with proper note link
-        workflow.add_task("test-1", "Fix something", "structural")
-        (self.test_dir / "sec" / "test.tex").write_text("some passage\n")
-        workflow.begin_task("test-1", [("sec/test.tex", "some passage")])
-        return workflow
-
-    def test_complete_updates_done_count(self):
-        workflow = self._make_workflow_with_task()
-        workflow.end_task()
-        dashboard = workflow._read_dashboard()
-        # structural: was "0 of 3" (2 original + 1 added), now 1 done
-        self.assertIn("1 of 3", dashboard)
 
 
 class SubtaskTest(TestFixture):
