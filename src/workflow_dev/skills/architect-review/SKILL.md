@@ -38,7 +38,7 @@ Read **every** file under `src/` and `test/`. Do not skip files.
 
 ```markdown
 ### Scope
-src/, test/
+<list the root folders you reviewed>
 
 ### Findings
 1. **Location** — file, class, method
