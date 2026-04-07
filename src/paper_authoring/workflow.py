@@ -340,6 +340,29 @@ class PaperAuthoring(Workflow):
         self.create_github_issues()
         self._write_state(Phase.IDLE)
 
+    def approve_triage_from_issue(self, review_issue_number: str) -> None:
+        """Exit triage by promoting accepted items from a review issue to standalone issues.
+
+        Reads the review issue body, creates a standalone issue for each
+        unchecked checklist item, then closes the review issue.
+        """
+        repo = self.get_repo()
+        review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
+        body = self._read_issue_body(review_url)
+
+        # Parse checklist: unchecked items are accepted, checked/strikethrough are rejected
+        for line in body.split("\n"):
+            line = line.strip()
+            if line.startswith("- [ ] "):
+                # Accepted finding — create standalone issue
+                description = line[6:].strip()  # after "- [ ] "
+                # Extract bold title if present: **Title.** Rest
+                self.create_issue(description, f"From review issue #{review_issue_number}")
+
+        # Close the review issue
+        self.close_issue(review_url)
+        self._write_state(Phase.IDLE)
+
     # --- Task selection ---
 
     AD_HOC = "Ad hoc"
@@ -964,8 +987,14 @@ def main() -> None:
         workflow.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
         print(f"Added {sys.argv[4]} task: {sys.argv[3]}")
     elif command == CMD_APPROVE_TRIAGE:
-        workflow.approve_triage()
-        print("Triage complete; entering idle")
+        if len(sys.argv) >= 3:
+            # Issue-based triage
+            workflow.approve_triage_from_issue(sys.argv[2])
+            print(f"Triage complete; review issue #{sys.argv[2]} closed")
+        else:
+            # Legacy dashboard-based triage
+            workflow.approve_triage()
+            print("Triage complete; entering idle")
     elif command == CMD_BEGIN_TASK:
         if len(sys.argv) < 4:
             print(f"Usage: workflow.py {CMD_BEGIN_TASK} <note-id> <regions-json>", file=sys.stderr)
