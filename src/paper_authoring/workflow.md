@@ -60,20 +60,20 @@ Two independent entry points can create review issues before the editing cycle b
 
 For a pre-existing paper not yet using this workflow.
 
-- Invoke **Structure Reviewer** for full-paper initial pass → creates a "Structure Review" issue with findings as checklist
-- Optionally invoke **Copy Editor** in full-paper review mode → creates a "Copy Edit Review" issue with findings as checklist
-- Enter triage (`begin-triage`); **Author** iterates through review issue checklist:
-  - **Accept finding** → `create-issue` to make a standalone Planned task
-  - **Reject finding** → check off with reason
-  - **Revise** → edit the finding description
-- When all items dispositioned: `approve-triage` → enter idle, ready for editing cycle
+- Invoke **Structure Reviewer** for full-paper initial pass → creates a review issue with findings as checklist
+- Optionally invoke **Copy Editor** in full-paper review mode (skip if paper is a rough draft) → creates a review issue with findings as checklist
+- Enter triage (`begin-triage`); **Author** iterates through the review issue:
+  - **Approve item** → keep in checklist
+  - **Merge/split** → edit the checklist
+  - **Reject** → strikethrough with reason
+- When satisfied: `approve-triage` → promotes accepted items to standalone issues (Planned); closes review issue; enters idle
 
 ### Reviewer feedback triage
 
-For a paper that has received external reviews.
+For a paper (pre-existing or authored using this workflow) that has received external reviews.
 
 - **Author Assistant** reads reviews (e.g. `reviews/*.md`), extracts actionable items
-- Creates a review issue with findings as checklist (same format as Structure/Copy reviewer output)
+- Creates a review issue with findings as checklist
 - Enter triage; **Author** iterates (same loop as cold start above)
 - When satisfied: `approve-triage`
 
