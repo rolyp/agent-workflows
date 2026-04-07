@@ -375,25 +375,7 @@ class PaperAuthoring(Workflow):
                     self.close_issue(issue_url)
                 except Exception:
                     pass
-            self._increment_done_count()
             self._write_state(Phase.IDLE)
-
-    def _increment_done_count(self) -> None:
-        """Increment the completed count for the current task's kind."""
-        state = self.read_state()
-        note_link = state.get("note_link")
-        if not note_link:
-            return  # issue-based task, no dashboard count to update
-        kind = "minor" if "minor-issues.md" in str(note_link) else "structural"
-        dashboard = self._read_dashboard()
-        count_pattern = rf"(Completed {kind}.*?\()(\d+)( of \d+\))"
-        count_match = re.search(count_pattern, dashboard, re.IGNORECASE)
-        if count_match:
-            old_done = int(count_match.group(2))
-            dashboard = (dashboard[:count_match.start(2)]
-                       + str(old_done + 1)
-                       + dashboard[count_match.end(2):])
-            self.dashboard_path.write_text(dashboard)
 
     # --- Subtasks ---
 
