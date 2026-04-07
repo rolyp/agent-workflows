@@ -610,8 +610,10 @@ class WorkflowDev(Workflow):
                 run_id = result.stdout.strip()
                 break
         if not run_id:
-            print(f"No CI run found for branch {branch}; skipping CI check", file=sys.stderr)
-            return
+            raise RuntimeError(
+                f"No CI run found for branch {branch} after 30s. "
+                f"Check that GitHub Actions is configured to run on this branch."
+            )
         deadline = time.time() + self.CI_TIMEOUT
 
         # Poll until run completes or timeout
