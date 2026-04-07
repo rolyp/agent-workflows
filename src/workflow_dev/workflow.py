@@ -304,7 +304,7 @@ class WorkflowDev(Workflow):
                 ["git", "commit", "-m", commit_message],
                 capture_output=True, text=True, cwd=self.root,
             )
-            if result.returncode != 0:
+            if result.returncode != 0 and "nothing to commit" not in result.stdout:
                 raise RuntimeError(f"Commit failed: {result.stderr}")
         # Get the commit SHA (post-commit hook may have recorded it, or use HEAD)
         commit_sha = subprocess.run(
