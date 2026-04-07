@@ -893,6 +893,18 @@ class PaperAuthoring(Workflow):
         entry += task["suffix"]
         return entry
 
+    def promote_findings(self, findings: list[tuple[str, str]]) -> list[str]:
+        """Create a standalone issue for each finding.
+
+        findings: list of (title, body) pairs.
+        Returns list of created issue URLs.
+        """
+        urls = []
+        for title, body in findings:
+            url = self.create_issue(title, body)
+            urls.append(url)
+        return urls
+
     def create_github_issues(self) -> None:
         """Create GitHub Issues for all To Do tasks and store URLs in dashboard."""
         dashboard = self._read_dashboard()
