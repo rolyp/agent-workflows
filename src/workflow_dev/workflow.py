@@ -45,6 +45,7 @@ CMD_BEGIN_MODIFY = "begin-modify"
 CMD_END_STEP = "end-step"
 CMD_ABORT_STEP = "abort-step"
 CMD_REQUEST_REVIEW = "request-review"
+CMD_SUBMIT_REVIEW = "submit-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
@@ -423,11 +424,53 @@ class WorkflowDev(Workflow):
         self._write_state(Phase.REVIEW, state.get("task"), reviewed_sha=head_sha)
         self._set_label(self.LABEL_REVIEW)
 
+    REVIEW_ROLES = ("user", "architect")
+
+    def submit_review(self, role: str, content: str) -> None:
+        """Submit a review as a comment on the issue."""
+        if role not in self.REVIEW_ROLES:
+            raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
+        phase = self._read_phase()
+        if phase is not Phase.REVIEW:
+            raise ValueError(f"submit-review only available during review (current: {phase.value})")
+        issue_url = self._issue_url_from_state()
+        if not issue_url:
+            raise ValueError("No issue URL in state")
+        repo = self.get_repo()
+        number = self._get_issue_number(issue_url)
+        comment = f"## {role.capitalize()} Review\n\n{content}"
+        env = self._gh_env()
+        result = subprocess.run(
+            ["gh", "issue", "comment", number, "--repo", repo, "--body", comment],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to submit review comment: {result.stderr}")
+        # Record in state
+        sf = self._read_state_file()
+        reviews = sf["stack"][-1].get("reviews_submitted", [])
+        if role not in reviews:
+            reviews.append(role)
+        sf["stack"][-1]["reviews_submitted"] = reviews
+        self._save_stack(sf["stack"], history=sf["history"])
+
+    def _missing_reviews(self) -> list[str]:
+        """Return list of review roles not yet submitted."""
+        state = self.read_state()
+        submitted = state.get("reviews_submitted", [])
+        return [r for r in self.REVIEW_ROLES if r not in submitted]
+
     def approve(self) -> None:
-        """Approve review; return to idle."""
+        """Approve review; return to idle. Requires both reviews submitted."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"approve only available during review (current: {phase.value})")
+        missing = self._missing_reviews()
+        if missing:
+            raise ValueError(
+                f"Cannot approve: missing reviews from {', '.join(missing)}. "
+                f"Use `submit-review <role> <content>` first."
+            )
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"))
         self._set_label(self.LABEL_IDLE)
@@ -732,6 +775,13 @@ def main() -> None:
     elif command == CMD_END_TASK:
         wd.end_task()
         print("Task complete; issue closed")
+    elif command == CMD_SUBMIT_REVIEW:
+        args = sys.argv[2:]
+        if len(args) < 2:
+            print(f"Usage: workflow.py {CMD_SUBMIT_REVIEW} <user|architect> <content>", file=sys.stderr)
+            sys.exit(1)
+        wd.submit_review(args[0], args[1])
+        print(f"Review submitted: {args[0]}")
     elif command == CMD_CREATE_ISSUE:
         args = sys.argv[2:]
         if len(args) < 2:
