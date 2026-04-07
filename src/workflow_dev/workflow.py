@@ -256,12 +256,8 @@ class WorkflowDev(Workflow):
         self._set_label(label_map[step_mode])
         self._render_issue_todos()
 
-    def end_step(self, commit_message: str | None = None) -> None:
-        """Pop the current step. Runs tests, commits, records in history.
-
-        If commit_message is provided, stages all changes and commits.
-        If not provided, requires a clean working tree.
-        """
+    def end_step(self, commit_message: str) -> None:
+        """Pop the current step. Runs tests, stages all changes, commits, records in history."""
         state = self.read_state()
         step_name = state.get("step")
         if not step_name:
@@ -275,17 +271,16 @@ class WorkflowDev(Workflow):
             sf["stack"][-1]["end_step_failed"] = True
             self._save_stack(sf["stack"], history=sf["history"])
             raise
-        # Commit if message provided
-        if commit_message:
-            subprocess.run(
-                ["git", "add", "-A"], capture_output=True, cwd=self.root,
-            )
-            result = subprocess.run(
-                ["git", "commit", "-m", commit_message],
-                capture_output=True, text=True, cwd=self.root,
-            )
-            if result.returncode != 0 and "nothing to commit" not in result.stdout:
-                raise RuntimeError(f"Commit failed: {result.stderr}")
+        # Stage and commit
+        subprocess.run(
+            ["git", "add", "-A"], capture_output=True, cwd=self.root,
+        )
+        result = subprocess.run(
+            ["git", "commit", "-m", commit_message],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if result.returncode != 0 and "nothing to commit" not in result.stdout:
+            raise RuntimeError(f"Commit failed: {result.stderr}")
         # Get the commit SHA (post-commit hook may have recorded it, or use HEAD)
         commit_sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -731,8 +726,10 @@ def main() -> None:
         wd.begin_modify(args[0], args[1:])
         print(f"Step: [modify] {args[0]}")
     elif command == CMD_END_STEP:
-        commit_msg = sys.argv[2] if len(sys.argv) > 2 else None
-        wd.end_step(commit_msg)
+        if len(sys.argv) < 3:
+            print(f"Usage: workflow.py {CMD_END_STEP} <commit-message>", file=sys.stderr)
+            sys.exit(1)
+        wd.end_step(sys.argv[2])
         print("Step complete; back to idle")
     elif command == CMD_ABORT_STEP:
         reason = sys.argv[2] if len(sys.argv) > 2 else ""
