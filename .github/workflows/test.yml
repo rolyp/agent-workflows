@@ -1,7 +1,7 @@
 name: Tests
 on:
   push:
-    branches: [main]
+    branches: [main, "task/**"]
   pull_request:
     branches: [main]
 
@@ -14,4 +14,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pytest mypy
-      - run: bash test.sh
+      - run: bash test/test.sh
