@@ -40,6 +40,7 @@ class StepMode(Enum):
 CMD_STARTUP = "startup"
 CMD_BEGIN_TASK = "begin-task"
 CMD_END_TASK = "end-task"
+CMD_SUSPEND_TASK = "suspend-task"
 CMD_BEGIN_REFACTOR = "begin-refactor"
 CMD_BEGIN_MODIFY = "begin-modify"
 CMD_END_STEP = "end-step"
@@ -170,18 +171,24 @@ class WorkflowDev(Workflow):
         return len(stack) == 1 and self._read_phase() is Phase.REFACTORING
 
     def begin_task(self, task: str, issue_number: str | None = None) -> None:
-        """Start a task. Creates branch, sets root frame to idle."""
+        """Start or resume a task. Creates or switches to branch, sets root frame to idle."""
         phase = self._read_phase()
         if phase is not Phase.IDLE:
             raise ValueError(f"Cannot begin task: current phase is {phase.value}, expected idle")
-        # Create and checkout branch
+        # Create or switch to branch
         branch = f"task/{task}"
         result = subprocess.run(
-            ["git", "checkout", "-b", branch],
+            ["git", "switch", branch],
             capture_output=True, text=True, cwd=self.root,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
+            # Branch doesn't exist — create it
+            result = subprocess.run(
+                ["git", "switch", "-c", branch],
+                capture_output=True, text=True, cwd=self.root,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
         issue_url = None
         if issue_number:
             repo = self.get_repo()
@@ -539,6 +546,30 @@ class WorkflowDev(Workflow):
             self.close_issue(issue_url)
         self._write_state(Phase.IDLE)
 
+    def suspend_task(self) -> None:
+        """Park the current task. Switches to main, sets issue to Planned."""
+        if not self._is_idle():
+            raise ValueError("suspend-task only available from idle. Run end-step first.")
+        # Require clean working tree
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", ".", ":!state.json"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if status.stdout.strip():
+            raise ValueError(
+                "Working tree is not clean. Commit changes before suspend-task.\n"
+                f"{status.stdout.strip()}"
+            )
+        issue_url = self._issue_url_from_state()
+        if issue_url:
+            self.set_issue_status(issue_url, "Planned")
+            self.clear_issue_labels(issue_url)
+        self._write_state(Phase.IDLE)
+        subprocess.run(
+            ["git", "switch", "main"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+
     # --- Protocol suspension ---
 
     def resume_protocol(self) -> None:
@@ -711,6 +742,9 @@ def main() -> None:
         if issue_number:
             msg += f" · issue #{issue_number} → In Progress"
         print(msg)
+    elif command == CMD_SUSPEND_TASK:
+        wd.suspend_task()
+        print("Task suspended; back to main")
     elif command == CMD_BEGIN_REFACTOR:
         args = sys.argv[2:]
         if len(args) < 2 or args[1] not in ("code", "test"):
