@@ -915,7 +915,7 @@ def main() -> None:
         command = sys.argv[1]
 
     try:
-        pa = PaperAuthoring(Path.cwd())
+        workflow = PaperAuthoring(Path.cwd())
     except FileNotFoundError as e:
         print(str(e))
         sys.exit(0)  # non-fatal for hooks — project may not use workflow
@@ -929,7 +929,7 @@ def main() -> None:
             sys.exit(1)
 
     if command == CMD_STARTUP:
-        state = pa.read_state()
+        state = workflow.read_state()
         phase = state["phase"]
         task = state.get("task")
         summary = f"Workflow state: {phase}"
@@ -937,22 +937,22 @@ def main() -> None:
             summary += f" — {task}"
         print(summary)
     elif command == CMD_BEGIN_TRIAGE:
-        pa.begin_triage()
+        workflow.begin_triage()
         print("Entered triage phase")
     elif command == CMD_RECLASSIFY:
         if len(sys.argv) < 4:
             print(f"Usage: workflow.py {CMD_RECLASSIFY} <note-id> <structural|minor>", file=sys.stderr)
             sys.exit(1)
-        pa.reclassify(sys.argv[2], sys.argv[3])
+        workflow.reclassify(sys.argv[2], sys.argv[3])
         print(f"Reclassified {sys.argv[2]} → {sys.argv[3]}")
     elif command == CMD_ADD_TASK:
         if len(sys.argv) < 5:
             print(f"Usage: workflow.py {CMD_ADD_TASK} <note-id> <description> <structural|minor>", file=sys.stderr)
             sys.exit(1)
-        pa.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
+        workflow.add_task(sys.argv[2], sys.argv[3], sys.argv[4])
         print(f"Added {sys.argv[4]} task: {sys.argv[3]}")
     elif command == CMD_APPROVE_TRIAGE:
-        pa.approve_triage()
+        workflow.approve_triage()
         print("Triage complete; entering idle")
     elif command == CMD_BEGIN_TASK:
         if len(sys.argv) < 4:
@@ -960,63 +960,63 @@ def main() -> None:
             print(f"  regions-json: [[\"file\", \"passage\"], ...]", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[3])
-        pa.begin_task(sys.argv[2], [(r[0], r[1]) for r in regions])
+        workflow.begin_task(sys.argv[2], [(r[0], r[1]) for r in regions])
         print(f"Selected task: {sys.argv[2]} ({len(regions)} region(s))")
     elif command == CMD_BEGIN_AD_HOC:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_BEGIN_AD_HOC} <regions-json>", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[2])
-        pa.begin_ad_hoc([(r[0], r[1]) for r in regions])
+        workflow.begin_ad_hoc([(r[0], r[1]) for r in regions])
         print(f"Ad hoc edit started ({len(regions)} region(s))")
     elif command == CMD_CREATE_PLAN:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_CREATE_PLAN} <plan-name>", file=sys.stderr)
             sys.exit(1)
-        plan_path = pa.create_plan(sys.argv[2])
+        plan_path = workflow.create_plan(sys.argv[2])
         print(f"Plan created: {plan_path}")
     elif command == CMD_APPROVE_PLAN:
-        pa.approve_plan()
+        workflow.approve_plan()
         print("Plan approved; returning to edit phase")
     elif command == CMD_ADD_SUBTASK:
         if len(sys.argv) < 4:
             print(f"Usage: workflow.py {CMD_ADD_SUBTASK} <subtask-id> <description>", file=sys.stderr)
             sys.exit(1)
-        pa.add_subtask(sys.argv[2], sys.argv[3])
+        workflow.add_subtask(sys.argv[2], sys.argv[3])
         print(f"Added subtask: {sys.argv[2]}")
     elif command == CMD_BEGIN_SUBTASK:
         if len(sys.argv) < 4:
             print(f"Usage: workflow.py {CMD_BEGIN_SUBTASK} <subtask-id> <regions-json>", file=sys.stderr)
             sys.exit(1)
         regions = json.loads(sys.argv[3])
-        pa.begin_subtask(sys.argv[2], [(r[0], r[1]) for r in regions])
+        workflow.begin_subtask(sys.argv[2], [(r[0], r[1]) for r in regions])
         print(f"Selected subtask: {sys.argv[2]} ({len(regions)} region(s))")
     elif command == CMD_END_TASK:
-        pa.end_task()
+        workflow.end_task()
         print("Task completed")
     elif command == CMD_OPEN_REVIEW:
         if len(sys.argv) < 4:
             print(f"Usage: workflow.py {CMD_OPEN_REVIEW} <file_path> <passage>", file=sys.stderr)
             sys.exit(1)
-        pa.open_review(sys.argv[2], sys.argv[3])
+        workflow.open_review(sys.argv[2], sys.argv[3])
         print(f"Review bars placed in {sys.argv[2]}")
     elif command == CMD_CLOSE_REVIEW:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_CLOSE_REVIEW} <file_path>", file=sys.stderr)
             sys.exit(1)
-        pa.close_review(sys.argv[2])
+        workflow.close_review(sys.argv[2])
         print(f"Review bars removed from {sys.argv[2]}")
     elif command == CMD_EDIT_TO_REVIEW:
-        pa.edit_to_review()
+        workflow.edit_to_review()
         print("Bars: edit → review")
     elif command == CMD_REVIEW_TO_EDIT:
-        pa.review_to_edit()
+        workflow.review_to_edit()
         print("Bars: review → edit")
     elif command == CMD_CHECK_EDIT:
         if len(sys.argv) < 3:
             print(f"Usage: workflow.py {CMD_CHECK_EDIT} <file_path>", file=sys.stderr)
             sys.exit(1)
-        allowed, message = pa.check_edit(sys.argv[2])
+        allowed, message = workflow.check_edit(sys.argv[2])
         if not allowed:
             print(message, file=sys.stderr)
             sys.exit(2)
