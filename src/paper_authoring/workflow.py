@@ -97,8 +97,6 @@ class PaperAuthoring(Workflow):
         self._init_state(Phase.IDLE)
     
 
-        # Ensure dashboard reflects current state
-        self._update_in_progress()
         self.assert_valid()
 
     # --- Invariants ---
@@ -179,63 +177,10 @@ class PaperAuthoring(Workflow):
 
     def _save_stack(self, stack: list[dict], history: list[dict] | None = None,
                     validate: bool = True) -> None:
-        """Write stack, update dashboard, optionally validate."""
+        """Write stack, optionally validate."""
         super()._save_stack(stack, history=history, validate=validate)
-        self._update_in_progress()
         if validate:
             self.assert_valid()
-
-    # --- Dashboard rendering ---
-
-    def _render_in_progress(self) -> str:
-        """Render the In Progress section from the state stack."""
-        stack = self._read_stack()
-        if not stack or stack[0].get("phase") == Phase.IDLE.value:
-            return "(none)"
-        # Bottom frame is the root task
-        root = stack[0]
-        lines = []
-        # Determine if root is the active leaf (no children on stack)
-        root_is_leaf = len(stack) == 1
-        prefix = "🔵 " if root_is_leaf else ""
-        # Render root task line
-        desc = root.get("description", root.get("task", "unknown"))
-        note_link = root.get("note_link")
-        plan_link = root.get("plan_link")
-        line = f"- {prefix}{desc}"
-        if note_link:
-            line += f" ([note]({note_link}))"
-        if plan_link:
-            line += f" · [plan]({plan_link})"
-        lines.append(line)
-        # Render subtasks
-        subtasks = root.get("subtasks", [])
-        for st in subtasks:
-            completed = st.get("completed", False)
-            st_is_active = any(
-                f.get("task") == st["id"] for f in stack[1:]
-            )
-            if completed:
-                lines.append(f"  - [x] {st['description']} (subtask: {st['id']})")
-            elif st_is_active:
-                lines.append(f"  - 🔵 {st['description']} (subtask: {st['id']})")
-            else:
-                lines.append(f"  - [ ] {st['description']} (subtask: {st['id']})")
-        return "\n".join(lines)
-
-    def _update_in_progress(self) -> None:
-        """Regenerate the In Progress section of the dashboard from state."""
-        if not self.dashboard_path.exists():
-            return
-        dashboard = self._read_dashboard()
-        rendered = self._render_in_progress()
-        # Replace the In Progress section
-        dashboard = re.sub(
-            r"(## In progress\n\n).*?(?=\n## )",
-            f"\\1{rendered}\n",
-            dashboard, flags=re.DOTALL,
-        )
-        self.dashboard_path.write_text(dashboard)
 
     # --- Triage commands ---
 
