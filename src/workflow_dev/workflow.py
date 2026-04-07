@@ -50,6 +50,7 @@ CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
 CMD_REOPEN_ISSUE = "reopen-issue"
+CMD_ADD_TO_PROJECT = "add-to-project"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
 
@@ -774,6 +775,17 @@ def main() -> None:
         issue_url = f"https://github.com/{repo}/issues/{args[0]}"
         wd.reopen_issue(issue_url)
         print(f"Reopened: issue #{args[0]}")
+    elif command == CMD_ADD_TO_PROJECT:
+        args = sys.argv[2:]
+        if len(args) < 1:
+            print(f"Usage: workflow.py {CMD_ADD_TO_PROJECT} <issue-number> [status]", file=sys.stderr)
+            print(f"  status: Proposed (default), Planned, In Progress, Done", file=sys.stderr)
+            sys.exit(1)
+        repo = wd.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{args[0]}"
+        status = args[1] if len(args) > 1 else "Proposed"
+        wd.add_to_project(issue_url, status)
+        print(f"Added #{args[0]} to project as {status}")
     elif command == CMD_RESUME_PROTOCOL:
         wd.resume_protocol()
         print("Protocol resumed.")

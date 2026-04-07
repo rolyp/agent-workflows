@@ -333,6 +333,14 @@ class Workflow(ABC):
                 return item["id"]
         raise RuntimeError(f"Issue {issue_url} not found in project")
 
+    def add_to_project(self, issue_url: str, status: str = "Proposed") -> None:
+        """Add an existing issue to the project and set its status."""
+        env = self._ensure_project_info()
+        item_id = self._add_issue_to_project(
+            issue_url, self._get_env("GH_PROJECT_ORG"),
+            self._get_env("GH_PROJECT_NUMBER"), env)
+        self._set_item_status(item_id, status, env)
+
     def set_issue_status(self, issue_url: str, status: str) -> None:
         """Set the project status of an issue (e.g. 'In Progress', 'Done')."""
         env = self._ensure_project_info()
