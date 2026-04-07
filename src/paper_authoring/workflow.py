@@ -516,23 +516,35 @@ class PaperAuthoring(Workflow):
 
     # --- Subtasks ---
 
-    def add_subtask(self, subtask_id: str, description: str) -> None:
+    def add_subtask(self, subtask_id: str, description: str,
+                    issue_number: str | None = None) -> None:
         """Add a subtask under the current in-progress task.
 
-        Creates a GitHub sub-issue if the parent task has an issue URL.
+        If issue_number is provided, links that existing issue as a sub-issue.
+        Otherwise creates a new sub-issue if the parent task has an issue URL.
         """
         state = self.read_state()
         parent_url = state.get("issue_url")
         sf = self._read_state_file()
         frame = sf["stack"][-1]
         subtask_entry: dict[str, object] = {"id": subtask_id, "description": description}
-        # Create GitHub sub-issue if parent has one
-        if parent_url:
+        if issue_number:
+            # Link existing issue
+            try:
+                repo = self.get_repo()
+                sub_url = f"https://github.com/{repo}/issues/{issue_number}"
+                if parent_url:
+                    self.create_sub_issue(parent_url, sub_url)
+                subtask_entry["issue_url"] = sub_url
+            except Exception as e:
+                print(f"GitHub operation failed: {e}", file=sys.stderr)
+        elif parent_url:
+            # Create new sub-issue
             try:
                 sub_url = self.create_sub_issue(parent_url, description)
                 subtask_entry["issue_url"] = sub_url
             except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)  # best-effort
+                print(f"GitHub operation failed: {e}", file=sys.stderr)
         subtasks = list(frame.get("subtasks", []))
         subtasks.append(subtask_entry)
         frame["subtasks"] = subtasks
