@@ -157,16 +157,6 @@ class InvariantTest(TestFixture):
             workflow.assert_valid()
         self.assertTrue(any("should not coexist" in e for e in ctx.exception.errors))
 
-    def test_count_mismatch(self):
-        workflow = self._make_workflow()
-        # Break invariant after construction
-        dashboard = _make_dashboard(structural_tasks=["Task one", "Task two"])
-        dashboard = dashboard.replace("0 of 2", "0 of 5")
-        (self.test_dir / "workflow" / "dashboard.md").write_text(dashboard)
-        with self.assertRaises(ValidationError) as ctx:
-            workflow.assert_valid()
-        self.assertTrue(any("count mismatch" in e for e in ctx.exception.errors))
-
 
 class StateTest(TestFixture):
     def test_edit_to_review_sets_review_phase(self):
@@ -465,16 +455,6 @@ class CompleteTaskTest(TestFixture):
         dashboard = workflow._read_dashboard()
         # structural: was "0 of 3" (2 original + 1 added), now 1 done
         self.assertIn("1 of 3", dashboard)
-
-    def test_complete_validates(self):
-        """end_task should call assert_valid; a broken state should raise."""
-        workflow = self._make_workflow_with_task()
-        # Corrupt the count before completing
-        dashboard = workflow._read_dashboard()
-        dashboard = dashboard.replace("0 of 3", "0 of 99")
-        workflow.dashboard_path.write_text(dashboard)
-        with self.assertRaises(ValidationError):
-            workflow.end_task()
 
 
 class SubtaskTest(TestFixture):

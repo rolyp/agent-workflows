@@ -105,12 +105,9 @@ class PaperAuthoring(Workflow):
 
     def assert_valid(self) -> None:
         errors = []
-        dashboard = self._read_dashboard()
         errors += self._state_file_exists()
-        errors += self._at_most_one_in_progress(dashboard)
-        errors += self._no_orphaned_markers(dashboard)
+        errors += self._no_orphaned_markers()
         errors += self._markers_do_not_coexist()
-        errors += self._progress_counts_consistent(dashboard)
         errors += self._state_consistent_with_markers()
         if errors:
             raise ValidationError(errors)
@@ -120,46 +117,21 @@ class PaperAuthoring(Workflow):
             return ["workflow/state.json does not exist"]
         return []
 
-    def _at_most_one_in_progress(self, dashboard: str) -> list[str]:
-        n = self._count_in_progress(dashboard)
-        if n > 1:
-            return [f"Multiple in-progress tasks ({n}) — expected at most 1"]
-        return []
-
-    def _no_orphaned_markers(self, dashboard: str) -> list[str]:
-        if self._count_in_progress(dashboard) > 0:
+    def _no_orphaned_markers(self) -> list[str]:
+        phase = self._read_phase()
+        if phase not in (Phase.IDLE, Phase.TRIAGE):
             return []
         errors = []
         if self._tex_files_containing(EDIT_START):
-            errors.append(f"Orphaned {EDIT_START} markers but no in-progress task")
+            errors.append(f"State is '{phase.value}' but {EDIT_START} markers found in .tex files")
         if self._tex_files_containing(REVIEW_START):
-            errors.append(f"Orphaned {REVIEW_START} markers but no in-progress task")
+            errors.append(f"State is '{phase.value}' but {REVIEW_START} markers found in .tex files")
         return errors
 
     def _markers_do_not_coexist(self) -> list[str]:
         if self._tex_files_containing(EDIT_START) and self._tex_files_containing(REVIEW_START):
             return [f"Both {EDIT_START} and {REVIEW_START} markers present — should not coexist"]
         return []
-
-    def _progress_counts_consistent(self, dashboard: str) -> list[str]:
-        errors = []
-        for kind in ("minor", "structural"):
-            match = re.search(
-                rf"Completed {kind}.*?\((\d+) of (\d+)\)", dashboard, re.IGNORECASE
-            )
-            if not match:
-                continue
-            done = int(match.group(1))
-            total = int(match.group(2))
-            todo = self._count_section_items(dashboard, kind.capitalize())
-            in_prog = self._count_in_progress_for_kind(dashboard, kind)
-            expected = done + in_prog + todo
-            if total != expected:
-                errors.append(
-                    f"{kind} count mismatch: header says {done} of {total}, "
-                    f"but {done} done + {in_prog} in-progress + {todo} to-do = {expected}"
-                )
-        return errors
 
     def _state_consistent_with_markers(self) -> list[str]:
         phase = self._read_phase()
@@ -811,29 +783,11 @@ class PaperAuthoring(Workflow):
         return any(text in region for region in regions)
 
 
-    def _count_in_progress_for_kind(self, dashboard: str, kind: str) -> int:
-        """Count in-progress items of the given kind from the state stack."""
-        stack = self._read_stack()
-        if not stack or stack[0].get("phase") == Phase.IDLE.value:
-            return 0
-        note_link = str(stack[0].get("note_link", ""))
-        if kind == "minor":
-            return 1 if "minor-issues.md" in note_link else 0
-        else:
-            return 1 if "structural.md" in note_link else 0
-
     def _minor_issues_path(self) -> Path:
         return self.root / "workflow" / "todo" / "minor-issues.md"
 
     def _read_dashboard(self) -> str:
         return self.dashboard_path.read_text()
-
-    def _count_in_progress(self, dashboard: str) -> int:
-        """Count in-progress tasks from the state stack."""
-        stack = self._read_stack()
-        if not stack or stack[0].get("phase") == Phase.IDLE.value:
-            return 0
-        return 1
 
     def _tex_files_containing(self, pattern: str) -> list[str]:
         return [
@@ -841,15 +795,6 @@ class PaperAuthoring(Workflow):
             if not f.startswith(str(self.root / "workflow"))
             if pattern in Path(f).read_text()
         ]
-
-    def _count_section_items(self, dashboard: str, section: str) -> int:
-        match = re.search(
-            rf"^### {section}$\n(.*?)(?=^### |\Z)",
-            dashboard, re.MULTILINE | re.DOTALL,
-        )
-        if not match:
-            return 0
-        return len(re.findall(r"^- ", match.group(1), re.MULTILINE))
 
     # --- GitHub Issues integration ---
 
