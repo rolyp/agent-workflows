@@ -17,8 +17,11 @@ def main() -> None:
 
     try:
         workflow = get_workflow(Path.cwd())
-    except Exception:
-        return  # fail open if workflow can't be constructed
+    except FileNotFoundError:
+        return  # project doesn't use this workflow — allow through
+    except Exception as e:
+        print(f"Workflow construction failed: {e}", file=sys.stderr)
+        sys.exit(2)  # fail closed
 
     allowed, message = workflow.check_write(file_path)
 

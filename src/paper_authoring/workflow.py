@@ -403,8 +403,8 @@ class PaperAuthoring(Workflow):
             try:
                 self.set_issue_status(issue_url, "In Progress")
                 self.set_issue_label(issue_url, self.LABEL_EDIT)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"GitHub operation failed: {e}", file=sys.stderr)
 
     def begin_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
@@ -531,8 +531,8 @@ class PaperAuthoring(Workflow):
             try:
                 sub_url = self.create_sub_issue(parent_url, description)
                 subtask_entry["issue_url"] = sub_url
-            except Exception:
-                pass  # best-effort
+            except Exception as e:
+                print(f"GitHub operation failed: {e}", file=sys.stderr)  # best-effort
         subtasks = list(frame.get("subtasks", []))
         subtasks.append(subtask_entry)
         frame["subtasks"] = subtasks
@@ -562,8 +562,8 @@ class PaperAuthoring(Workflow):
             try:
                 self.set_issue_status(subtask_url, "In Progress")
                 self.set_issue_label(subtask_url, self.LABEL_EDIT)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"GitHub operation failed: {e}", file=sys.stderr)
 
 
     # --- Bar operations (require active task) ---
@@ -601,8 +601,8 @@ class PaperAuthoring(Workflow):
         if issue_url:
             try:
                 self.set_issue_label(issue_url, self.LABEL_REVIEW)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"GitHub operation failed: {e}", file=sys.stderr)
 
     def review_to_edit(self) -> None:
         """Swap all review bars to edit bars; transition to edit phase."""
@@ -619,8 +619,8 @@ class PaperAuthoring(Workflow):
         if issue_url:
             try:
                 self.set_issue_label(issue_url, self.LABEL_EDIT)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"GitHub operation failed: {e}", file=sys.stderr)
 
     def _build(self) -> None:
         """Run the build script if it exists."""

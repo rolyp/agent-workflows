@@ -144,6 +144,12 @@ class StateTransitionTest(TestFixture):
         with self.assertRaises(ValueError):
             wd.request_review()
 
+    def _submit_mock_reviews(self, wd):
+        """Mark both reviews as submitted in state (without GitHub calls)."""
+        sf = wd._read_state_file()
+        sf["stack"][-1]["reviews_submitted"] = list(wd.REVIEW_ROLES)
+        wd._save_stack(sf["stack"], history=sf["history"])
+
     def test_review_approve_returns_to_idle(self):
         wd = self._make_wd()
         wd.begin_task("task-1")
@@ -151,6 +157,7 @@ class StateTransitionTest(TestFixture):
         wd.end_step()
         wd.request_review()
         self.assertEqual(wd.read_state()["phase"], "review")
+        self._submit_mock_reviews(wd)
         wd.approve()
         self.assertEqual(wd.read_state()["phase"], "refactoring")
         self.assertNotIn("mode", wd.read_state())
@@ -161,10 +168,31 @@ class StateTransitionTest(TestFixture):
         wd.begin_refactor("Work", "code")
         wd.end_step()
         wd.request_review()
+        self._submit_mock_reviews(wd)
         wd.feedback()
         state = wd.read_state()
         self.assertEqual(state["phase"], "refactoring")
         self.assertEqual(state["task"], "task-1")
+
+    def test_feedback_without_reviews_fails(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step()
+        wd.request_review()
+        with self.assertRaises(ValueError) as ctx:
+            wd.feedback()
+        self.assertIn("missing reviews", str(ctx.exception))
+
+    def test_approve_without_reviews_fails(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step()
+        wd.request_review()
+        with self.assertRaises(ValueError) as ctx:
+            wd.approve()
+        self.assertIn("missing reviews", str(ctx.exception))
 
     def test_end_task_after_review(self):
         wd = self._make_wd()
@@ -172,6 +200,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_refactor("Work", "code")
         wd.end_step()
         wd.request_review()
+        self._submit_mock_reviews(wd)
         wd.approve()
         wd.end_task()
         self.assertEqual(wd.read_state()["phase"], "idle")
