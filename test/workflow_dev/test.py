@@ -168,10 +168,21 @@ class StateTransitionTest(TestFixture):
         wd.begin_refactor("Work", "code")
         wd.end_step()
         wd.request_review()
+        self._submit_mock_reviews(wd)
         wd.feedback()
         state = wd.read_state()
         self.assertEqual(state["phase"], "refactoring")
         self.assertEqual(state["task"], "task-1")
+
+    def test_feedback_without_reviews_fails(self):
+        wd = self._make_wd()
+        wd.begin_task("task-1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step()
+        wd.request_review()
+        with self.assertRaises(ValueError) as ctx:
+            wd.feedback()
+        self.assertIn("missing reviews", str(ctx.exception))
 
     def test_approve_without_reviews_fails(self):
         wd = self._make_wd()

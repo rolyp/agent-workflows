@@ -476,10 +476,16 @@ class WorkflowDev(Workflow):
         self._set_label(self.LABEL_IDLE)
 
     def feedback(self, items: list[str] | None = None) -> None:
-        """Review feedback; return to idle. Optionally add todo items."""
+        """Review feedback; return to idle. Requires reviews to have been submitted."""
         phase = self._read_phase()
         if phase is not Phase.REVIEW:
             raise ValueError(f"feedback only available during review (current: {phase.value})")
+        missing = self._missing_reviews()
+        if missing:
+            raise ValueError(
+                f"Cannot provide feedback: missing reviews from {', '.join(missing)}. "
+                f"Use `submit-review <role> <content>` first."
+            )
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"))
         self._set_label(self.LABEL_IDLE)
