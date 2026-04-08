@@ -170,7 +170,7 @@ class WorkflowDev(Workflow):
     def _is_task_idle(self) -> bool:
         """True if at root frame with no mode (idle within a task)."""
         stack = self._read_stack()
-        return len(stack) == 1 and self._read_phase() is Phase.REFACTORING
+        return len(stack) == 1 and self._read_phase() in (Phase.REFACTORING, Phase.APPROVED)
 
     def _require_task_idle(self, command: str) -> None:
         """Raise if not idle within a task."""
@@ -231,7 +231,7 @@ class WorkflowDev(Workflow):
                     rationale: list[str] | None = None) -> None:
         """Internal: push a step frame."""
         phase = self._read_phase()
-        if phase not in (Phase.REFACTORING, Phase.MODIFYING):
+        if phase not in (Phase.REFACTORING, Phase.MODIFYING, Phase.APPROVED):
             raise ValueError(f"begin-step not available in {phase.value}. Use begin-task first.")
         # Require clean working tree (excluding state.json which is workflow-managed)
         status = subprocess.run(
@@ -450,8 +450,8 @@ class WorkflowDev(Workflow):
         submitted = state.get("reviews_submitted", [])
         return [r for r in self.REVIEW_ROLES if r not in submitted]
 
-    def _complete_review(self, command: str) -> None:
-        """Shared logic for approve/feedback: validate phase, check reviews, return to idle."""
+    def _complete_review(self, command: str, target_phase: Phase = Phase.REFACTORING) -> None:
+        """Shared logic for approve/feedback: validate phase, check reviews, transition."""
         self._require_phase(Phase.REVIEW, command)
         missing = self._missing_reviews()
         if missing:
@@ -460,7 +460,7 @@ class WorkflowDev(Workflow):
                 f"Use `submit-review <role> <content>` first."
             )
         state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"))
+        self._write_state(target_phase, state.get("task"))
         self._set_label(self.LABEL_IDLE)
 
     def approve(self) -> None:
@@ -589,7 +589,7 @@ class WorkflowDev(Workflow):
         if phase is Phase.REVIEW:
             return False, "Edits blocked during review."
 
-        if phase is Phase.REFACTORING and not mode:
+        if phase in (Phase.REFACTORING, Phase.APPROVED) and not mode:
             return False, f"Idle — no step active. Use `{CMD_BEGIN_REFACTOR} <desc> <code|test>` or `{CMD_BEGIN_MODIFY} <desc> <rationale...>`."
 
         if mode == StepMode.CODE.value:
