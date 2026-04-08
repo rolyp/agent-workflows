@@ -550,6 +550,11 @@ class WorkflowDev(Workflow):
 
     # --- Protocol suspension ---
 
+    def is_protocol_suspended(self) -> bool:
+        """Check if protocol mode is suspended."""
+        sf = self._read_state_file()
+        return sf.get("protocol_suspended", False)
+
     def _suspend_protocol(self) -> None:
         """Suspend protocol mode. Developer-only — not exposed via CLI."""
         sf = self._read_state_file()
