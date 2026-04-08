@@ -54,6 +54,12 @@ def _is_protocol_suspended() -> bool:
     return False
 
 
+# Add agent-workflows root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from workflow_dev.workflow import WorkflowDev
+
+
 def main() -> None:
     tool_input = json.load(sys.stdin)
     command = tool_input.get("tool_input", {}).get("command", "")
