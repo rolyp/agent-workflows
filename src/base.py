@@ -377,6 +377,19 @@ class Workflow(ABC):
     # Subclasses must define their own labels and WORKFLOW_LABELS tuple.
     WORKFLOW_LABELS: tuple[str, ...] = ()
 
+    def add_label(self, issue_url: str, label: str) -> None:
+        """Add a label to an issue."""
+        repo = self.get_repo()
+        env = self._gh_env()
+        number = self._get_issue_number(issue_url)
+        result = subprocess.run(
+            ["gh", "issue", "edit", number, "--repo", repo,
+             "--add-label", label],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to add label '{label}': {result.stderr}")
+
     def set_issue_label(self, issue_url: str, label: str) -> None:
         """Set exactly one workflow label on an issue, removing any others.
 
