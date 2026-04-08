@@ -550,11 +550,23 @@ class WorkflowDev(Workflow):
 
     # --- Protocol suspension ---
 
+    def _suspend_protocol(self) -> None:
+        """Suspend protocol mode. Developer-only — not exposed via CLI."""
+        sf = self._read_state_file()
+        sf["protocol_suspended"] = True
+        self._write_state_file(sf)
+
     def resume_protocol(self) -> None:
         """Resume protocol mode."""
         sf = self._read_state_file()
         sf.pop("protocol_suspended", None)
         self._write_state_file(sf)
+
+    def _approve_task(self) -> None:
+        """Set current task to approved. Developer-only — not exposed via CLI."""
+        self._require_task_idle("approve-task")
+        state = self.read_state()
+        self._write_state(Phase.APPROVED, state.get("task"))
 
     # --- Hook gates ---
 

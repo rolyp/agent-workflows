@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """Suspend protocol mode. Developer-only — run via ! prefix."""
 
-import json
+import sys
 from pathlib import Path
 
-state_path = Path("state.json")
-if not state_path.exists():
-    print("No state.json found")
-    raise SystemExit(1)
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-sf = json.loads(state_path.read_text())
-sf["protocol_suspended"] = True
-state_path.write_text(json.dumps(sf, indent=2) + "\n")
+from workflow_dev.workflow import WorkflowDev
+
+wd = WorkflowDev(Path("."))
+wd._suspend_protocol()
 print("Protocol suspended. Resume with: python3 src/workflow_dev/workflow.py resume-protocol")
