@@ -171,13 +171,13 @@ class WorkflowDev(Workflow):
         stack = self._read_stack()
         return len(stack) == 1 and self._read_phase() is Phase.REFACTORING
 
-    def begin_task(self, task: str, issue_number: str | None = None) -> None:
+    def begin_task(self, issue_number: str) -> None:
         """Start or resume a task. Creates or switches to branch, sets root frame to idle."""
         phase = self._read_phase()
         if phase is not Phase.IDLE:
             raise ValueError(f"Cannot begin task: current phase is {phase.value}, expected idle")
         # Create or switch to branch
-        branch = f"task/{task}"
+        branch = f"task/{issue_number}"
         result = subprocess.run(
             ["git", "switch", branch],
             capture_output=True, text=True, cwd=self.root,
@@ -190,12 +190,10 @@ class WorkflowDev(Workflow):
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
-        issue_url = None
-        if issue_number:
-            repo = self.get_repo()
-            issue_url = f"https://github.com/{repo}/issues/{issue_number}"
-            self.set_issue_status(issue_url, "In Progress")
-        self._write_state(Phase.REFACTORING, task, issue_url=issue_url)
+        repo = self.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+        self.set_issue_status(issue_url, "In Progress")
+        self._write_state(Phase.REFACTORING, issue_number, issue_url=issue_url)
         # Clear history from previous task
         sf = self._read_state_file()
         sf["history"] = []
@@ -735,14 +733,10 @@ def main() -> None:
         print(summary)
     elif command == CMD_BEGIN_TASK:
         if len(sys.argv) < 3:
-            print(f"Usage: workflow.py {CMD_BEGIN_TASK} <task-name> [issue-number]", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_BEGIN_TASK} <issue-number>", file=sys.stderr)
             sys.exit(1)
-        issue_number = sys.argv[3] if len(sys.argv) > 3 else None
-        wd.begin_task(sys.argv[2], issue_number)
-        msg = f"Task started: {sys.argv[2]} (idle)"
-        if issue_number:
-            msg += f" · issue #{issue_number} → In Progress"
-        print(msg)
+        wd.begin_task(sys.argv[2])
+        print(f"Task started: #{sys.argv[2]} (idle)")
     elif command == CMD_SUSPEND_TASK:
         wd.suspend_task()
         print("Task suspended; back to main")
