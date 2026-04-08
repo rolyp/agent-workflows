@@ -53,6 +53,7 @@ CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
 CMD_REOPEN_ISSUE = "reopen-issue"
 CMD_ADD_TO_PROJECT = "add-to-project"
+CMD_SYNC_PROJECT = "sync-project"
 CMD_LABEL_ISSUE = "label-issue"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
@@ -811,6 +812,14 @@ def main() -> None:
         status = args[1] if len(args) > 1 else "Proposed"
         wd.add_to_project(issue_url, status)
         print(f"Added #{args[0]} to project as {status}")
+    elif command == CMD_SYNC_PROJECT:
+        added = wd.sync_project()
+        if added:
+            for url in added:
+                print(f"Added: {url}")
+            print(f"Synced {len(added)} issue(s)")
+        else:
+            print("All issues already in project")
     elif command == CMD_LABEL_ISSUE:
         args = sys.argv[2:]
         if len(args) < 2:

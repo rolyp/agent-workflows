@@ -333,6 +333,28 @@ class Workflow(ABC):
                 return item["id"]
         raise RuntimeError(f"Issue {issue_url} not found in project")
 
+    def sync_project(self) -> list[str]:
+        """Ensure all open issues are in the project. Returns list of newly added issue URLs."""
+        repo = self.get_repo()
+        env = self._gh_env()
+        result = subprocess.run(
+            ["gh", "issue", "list", "--repo", repo, "--state", "open",
+             "--json", "number,url", "--limit", "200"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to list issues: {result.stderr}")
+        issues = json.loads(result.stdout)
+        added = []
+        for issue in issues:
+            issue_url = issue["url"]
+            try:
+                self._find_project_item(issue_url, self._ensure_project_info())
+            except RuntimeError:
+                self.add_to_project(issue_url)
+                added.append(issue_url)
+        return added
+
     def add_to_project(self, issue_url: str, status: str = "Proposed") -> None:
         """Add an existing issue to the project and set its status."""
         env = self._ensure_project_info()
