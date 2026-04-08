@@ -59,6 +59,21 @@ def main() -> None:
     if _is_whitelisted(command):
         return
 
+    # Gate rm commands via the same file-access check as Edit/Write
+    cmd = command.strip()
+    if cmd.startswith("rm "):
+        for path in cmd[3:].split():
+            if path.startswith("-"):
+                continue
+            rel_path = wd._resolve(path)
+            if rel_path is None:
+                continue
+            allowed, message = wd.check_file_access(rel_path)
+            if not allowed:
+                print(message, file=sys.stderr)
+                sys.exit(2)
+        return
+
     print(
         f"Command blocked by protocol: {command[:80]}...\n"
         "Only read-only commands and workflow.py commands are allowed.\n"
