@@ -524,7 +524,7 @@ class WorkflowDev(Workflow):
         issue_url = self._issue_url_from_state()
         if issue_url:
             self.close_issue(issue_url)
-        self._write_state(Phase.IDLE)
+        self._write_state(Phase.IDLE, issue_url=None)
 
     def suspend_task(self) -> None:
         """Park the current task. Switches to main, sets issue to Planned."""
