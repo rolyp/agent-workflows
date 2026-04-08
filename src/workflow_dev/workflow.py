@@ -166,10 +166,21 @@ class WorkflowDev(Workflow):
         if issue_url:
             self.clear_issue_labels(issue_url)
 
-    def _is_idle(self) -> bool:
+    def _is_task_idle(self) -> bool:
         """True if at root frame with no mode (idle within a task)."""
         stack = self._read_stack()
         return len(stack) == 1 and self._read_phase() is Phase.REFACTORING
+
+    def _require_task_idle(self, command: str) -> None:
+        """Raise if not idle within a task."""
+        if not self._is_task_idle():
+            raise ValueError(f"{command} only available from idle. Run end-step first.")
+
+    def _require_phase(self, expected: Phase, command: str) -> None:
+        """Raise if not in the expected phase."""
+        phase = self._read_phase()
+        if phase is not expected:
+            raise ValueError(f"{command} only available during {expected.value} (current: {phase.value})")
 
     def begin_task(self, issue_number: str) -> None:
         """Start or resume a task. Creates or switches to branch, sets root frame to idle."""
@@ -381,8 +392,7 @@ class WorkflowDev(Workflow):
 
     def request_review(self) -> None:
         """Request code review. Pushes branch, runs tests, checks CI."""
-        if not self._is_idle():
-            raise ValueError("request-review only available from idle. Run end-step first.")
+        self._require_task_idle("request-review")
         self._run_tests()
         # Push branch and check CI (skip if no remote)
         has_remote = subprocess.run(
@@ -411,9 +421,7 @@ class WorkflowDev(Workflow):
         """Submit a review as a comment on the issue."""
         if role not in self.REVIEW_ROLES:
             raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
-        phase = self._read_phase()
-        if phase is not Phase.REVIEW:
-            raise ValueError(f"submit-review only available during review (current: {phase.value})")
+        self._require_phase(Phase.REVIEW, "submit-review")
         issue_url = self._issue_url_from_state()
         if not issue_url:
             raise ValueError("No issue URL in state")
@@ -443,9 +451,7 @@ class WorkflowDev(Workflow):
 
     def approve(self) -> None:
         """Approve review; return to idle. Requires both reviews submitted."""
-        phase = self._read_phase()
-        if phase is not Phase.REVIEW:
-            raise ValueError(f"approve only available during review (current: {phase.value})")
+        self._require_phase(Phase.REVIEW, "respond-review/approve")
         missing = self._missing_reviews()
         if missing:
             raise ValueError(
@@ -458,9 +464,7 @@ class WorkflowDev(Workflow):
 
     def feedback(self, items: list[str] | None = None) -> None:
         """Review feedback; return to idle. Requires reviews to have been submitted."""
-        phase = self._read_phase()
-        if phase is not Phase.REVIEW:
-            raise ValueError(f"feedback only available during review (current: {phase.value})")
+        self._require_phase(Phase.REVIEW, "respond-review/feedback")
         missing = self._missing_reviews()
         if missing:
             raise ValueError(
@@ -486,8 +490,7 @@ class WorkflowDev(Workflow):
 
     def end_task(self) -> None:
         """Complete the current task. Requires review since last code change."""
-        if not self._is_idle():
-            raise ValueError("end-task only available from idle. Run end-step first.")
+        self._require_task_idle("end-task")
 
         state = self.read_state()
         reviewed_sha = state.get("reviewed_sha")
@@ -547,8 +550,7 @@ class WorkflowDev(Workflow):
 
     def suspend_task(self) -> None:
         """Park the current task. Switches to main, sets issue to Planned."""
-        if not self._is_idle():
-            raise ValueError("suspend-task only available from idle. Run end-step first.")
+        self._require_task_idle("suspend-task")
         # Require clean working tree
         status = subprocess.run(
             ["git", "status", "--porcelain", "--", ".", ":!state.json"],
