@@ -464,8 +464,8 @@ class WorkflowDev(Workflow):
         self._set_label(self.LABEL_IDLE)
 
     def approve(self) -> None:
-        """Approve review; return to idle. Requires both reviews submitted."""
-        self._complete_review("respond-review/approve")
+        """Approve review; transition to approved. Requires both reviews submitted."""
+        self._complete_review("respond-review/approve", Phase.APPROVED)
 
     def feedback(self, items: list[str] | None = None) -> None:
         """Review feedback; return to idle. Requires reviews to have been submitted."""
@@ -485,23 +485,8 @@ class WorkflowDev(Workflow):
                 self._write_issue_body(issue_url, body)
 
     def end_task(self) -> None:
-        """Complete the current task. Requires review since last code change."""
-        self._require_task_idle("end-task")
-
-        state = self.read_state()
-        reviewed_sha = state.get("reviewed_sha")
-        if not reviewed_sha:
-            raise ValueError("No review on record. Run request-review first.")
-
-        head_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=self.root,
-        ).stdout.strip()
-        if head_sha != reviewed_sha:
-            raise ValueError(
-                f"Code changed since last review (reviewed: {reviewed_sha[:8]}, "
-                f"HEAD: {head_sha[:8]}). Run request-review again."
-            )
+        """Complete the current task. Requires approved review."""
+        self._require_phase(Phase.APPROVED, "end-task")
 
         # Merge branch to main (skip if already on main or no remote)
         branch = subprocess.run(

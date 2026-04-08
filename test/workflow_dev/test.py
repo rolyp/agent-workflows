@@ -172,7 +172,7 @@ class StateTransitionTest(TestFixture):
         self.assertEqual(wd.read_state()["phase"], "review")
         self._submit_mock_reviews(wd)
         wd.approve()
-        self.assertEqual(wd.read_state()["phase"], "refactoring")
+        self.assertEqual(wd.read_state()["phase"], "approved")
         self.assertNotIn("mode", wd.read_state())
 
     def test_feedback_returns_to_idle(self):
