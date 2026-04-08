@@ -570,7 +570,7 @@ class WorkflowDev(Workflow):
 
     # --- Hook gates ---
 
-    def _check_file_access(self, rel_path: str) -> tuple[bool, str]:
+    def check_file_access(self, rel_path: str) -> tuple[bool, str]:
         """Shared gate logic for check_edit and check_write."""
         phase = self._read_phase()
         state = self.read_state()
@@ -601,14 +601,14 @@ class WorkflowDev(Workflow):
         rel_path = self._resolve(file_path)
         if rel_path is None:
             return True, ""
-        return self._check_file_access(rel_path)
+        return self.check_file_access(rel_path)
 
     def check_write(self, file_path: str) -> tuple[bool, str]:
         """Gate file creation based on current step mode."""
         rel_path = self._resolve(file_path)
         if rel_path is None:
             return True, ""
-        return self._check_file_access(rel_path)
+        return self.check_file_access(rel_path)
 
     # --- Helpers ---
 
