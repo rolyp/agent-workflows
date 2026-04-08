@@ -28,6 +28,7 @@ class Phase(Enum):
     REFACTORING = "refactoring"
     MODIFYING = "modifying"
     REVIEW = "review"
+    APPROVED = "approved"
 
 
 class StepMode(Enum):
