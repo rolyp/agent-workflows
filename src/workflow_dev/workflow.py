@@ -449,31 +449,26 @@ class WorkflowDev(Workflow):
         submitted = state.get("reviews_submitted", [])
         return [r for r in self.REVIEW_ROLES if r not in submitted]
 
-    def approve(self) -> None:
-        """Approve review; return to idle. Requires both reviews submitted."""
-        self._require_phase(Phase.REVIEW, "respond-review/approve")
+    def _complete_review(self, command: str) -> None:
+        """Shared logic for approve/feedback: validate phase, check reviews, return to idle."""
+        self._require_phase(Phase.REVIEW, command)
         missing = self._missing_reviews()
         if missing:
             raise ValueError(
-                f"Cannot approve: missing reviews from {', '.join(missing)}. "
+                f"Cannot {command}: missing reviews from {', '.join(missing)}. "
                 f"Use `submit-review <role> <content>` first."
             )
         state = self.read_state()
         self._write_state(Phase.REFACTORING, state.get("task"))
         self._set_label(self.LABEL_IDLE)
 
+    def approve(self) -> None:
+        """Approve review; return to idle. Requires both reviews submitted."""
+        self._complete_review("respond-review/approve")
+
     def feedback(self, items: list[str] | None = None) -> None:
         """Review feedback; return to idle. Requires reviews to have been submitted."""
-        self._require_phase(Phase.REVIEW, "respond-review/feedback")
-        missing = self._missing_reviews()
-        if missing:
-            raise ValueError(
-                f"Cannot provide feedback: missing reviews from {', '.join(missing)}. "
-                f"Use `submit-review <role> <content>` first."
-            )
-        state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"))
-        self._set_label(self.LABEL_IDLE)
+        self._complete_review("respond-review/feedback")
         if items:
             issue_url = self._issue_url_from_state()
             if issue_url:
