@@ -10,4 +10,4 @@ from workflow_dev.workflow import WorkflowDev
 
 wd = WorkflowDev(Path("."))
 wd._approve_task()
-print("Task approved. Run: python3 src/workflow_dev/workflow.py end-task")
+print("Task approved.")
