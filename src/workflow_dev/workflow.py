@@ -91,7 +91,7 @@ class WorkflowDev(Workflow):
     )
 
     # Fields carried forward from previous frame unless overridden
-    _CARRY_FORWARD = ("issue_url", "reviewed_sha")
+    _CARRY_FORWARD = ("issue_url",)
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
@@ -408,12 +408,8 @@ class WorkflowDev(Workflow):
             if result.returncode != 0:
                 raise RuntimeError(f"Push failed: {result.stderr}")
             self._check_ci()
-        head_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=self.root,
-        ).stdout.strip()
         state = self.read_state()
-        self._write_state(Phase.REVIEW, state.get("task"), reviewed_sha=head_sha)
+        self._write_state(Phase.REVIEW, state.get("task"))
         self._set_label(self.LABEL_REVIEW)
 
     REVIEW_ROLES = ("user", "architect")
