@@ -6,10 +6,14 @@ Suspend with: ! python3 scripts/suspend-protocol.py
 Resume with: python3 src/workflow_dev/workflow.py resume-protocol
 """
 
-import json
-import re
 import sys
 from pathlib import Path
+
+# Add agent-workflows root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+import json
+from workflow_dev.workflow import WorkflowDev
 
 
 # Read-only command prefixes (always allowed)
@@ -41,19 +45,6 @@ def _is_whitelisted(command: str) -> bool:
     return False
 
 
-def _is_protocol_suspended() -> bool:
-    """Check if protocol is suspended via state.json flag."""
-    for state_path in [Path("state.json"), Path.cwd() / "state.json"]:
-        if state_path.exists():
-            try:
-                sf = json.loads(state_path.read_text())
-                if isinstance(sf, dict):
-                    return sf.get("protocol_suspended", False)
-            except (json.JSONDecodeError, OSError):
-                pass
-    return False
-
-
 def main() -> None:
     tool_input = json.load(sys.stdin)
     command = tool_input.get("tool_input", {}).get("command", "")
@@ -61,10 +52,26 @@ def main() -> None:
     if not command:
         return
 
-    if _is_protocol_suspended():
+    wd = WorkflowDev(Path.cwd())
+    if wd.is_protocol_suspended():
         return
 
     if _is_whitelisted(command):
+        return
+
+    # Gate rm commands via the same file-access check as Edit/Write
+    cmd = command.strip()
+    if cmd.startswith("rm "):
+        for path in cmd[3:].split():
+            if path.startswith("-"):
+                continue
+            rel_path = wd._resolve(path)
+            if rel_path is None:
+                continue
+            allowed, message = wd.check_file_access(rel_path)
+            if not allowed:
+                print(message, file=sys.stderr)
+                sys.exit(2)
         return
 
     print(

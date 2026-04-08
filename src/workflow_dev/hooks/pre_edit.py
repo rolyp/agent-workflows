@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
 """PreToolUse hook for Edit. Gates edits via WorkflowDev state machine."""
 
-import json
 import sys
 from pathlib import Path
-
-
-def _is_protocol_suspended():
-    for sp in [Path("state.json"), Path.cwd() / "state.json"]:
-        if sp.exists():
-            try:
-                sf = json.loads(sp.read_text())
-                if isinstance(sf, dict): return sf.get("protocol_suspended", False)
-            except: pass
-    return False
 
 # Add agent-workflows root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import json
 from workflow_dev.workflow import WorkflowDev
 
 
@@ -30,7 +20,8 @@ def main() -> None:
     if not file_path:
         return
 
-    if _is_protocol_suspended():
+    wd = WorkflowDev(Path.cwd())
+    if wd.is_protocol_suspended():
         return
 
     if Path(file_path).name == "state.json":

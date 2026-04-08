@@ -18,8 +18,21 @@ class TestFixture(unittest.TestCase):
         self.orig_dir = os.getcwd()
         self.test_dir = Path(tempfile.mkdtemp())
         os.chdir(self.test_dir)
+        # Mock GitHub operations so tests don't hit the API
+        self._patches = [
+            patch.object(WorkflowDev, "get_repo", return_value="test/repo"),
+            patch.object(WorkflowDev, "set_issue_status"),
+            patch.object(WorkflowDev, "set_issue_label"),
+            patch.object(WorkflowDev, "clear_issue_labels"),
+            patch.object(WorkflowDev, "close_issue"),
+            patch.object(WorkflowDev, "_render_issue_todos"),
+        ]
+        for p in self._patches:
+            p.start()
 
     def tearDown(self):
+        for p in self._patches:
+            p.stop()
         os.chdir(self.orig_dir)
         shutil.rmtree(self.test_dir)
 
@@ -80,21 +93,21 @@ class ConstructorTest(TestFixture):
 class StateTransitionTest(TestFixture):
     def test_begin_task_enters_idle(self):
         wd = self._make_wd()
-        wd.begin_task("extract-base")
+        wd.begin_task("1")
         state = wd.read_state()
         self.assertEqual(state["phase"], "refactoring")
-        self.assertEqual(state["task"], "extract-base")
+        self.assertEqual(state["task"], "1")
         self.assertNotIn("mode", state)
 
     def test_begin_task_rejects_non_idle(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         with self.assertRaises(ValueError):
-            wd.begin_task("task-2")
+            wd.begin_task("2")
 
     def test_begin_refactor_pushes_frame(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Fix imports", "code")
         state = wd.read_state()
         self.assertEqual(state["step"], "[refactor/code] Fix imports")
@@ -102,7 +115,7 @@ class StateTransitionTest(TestFixture):
 
     def test_end_step_pops_to_idle(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Fix imports", "code")
         wd.end_step("test commit")
         state = wd.read_state()
@@ -111,7 +124,7 @@ class StateTransitionTest(TestFixture):
 
     def test_nested_steps(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Outer", "code")
         wd.begin_refactor("Inner", "code")
         self.assertEqual(wd.read_state()["step"], "[refactor/code] Inner")
@@ -122,7 +135,7 @@ class StateTransitionTest(TestFixture):
 
     def test_modify_step(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_modify("Add feature",
                         rationale=["test_x: no feature → feature exists"])
         state = wd.read_state()
@@ -132,14 +145,14 @@ class StateTransitionTest(TestFixture):
 
     def test_modify_step_requires_rationale(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         with self.assertRaises(ValueError) as ctx:
             wd.begin_modify("Add feature", rationale=[])
         self.assertIn("rationale", str(ctx.exception))
 
     def test_request_review_only_from_idle(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         with self.assertRaises(ValueError):
             wd.request_review()
@@ -152,19 +165,19 @@ class StateTransitionTest(TestFixture):
 
     def test_review_approve_returns_to_idle(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "test")
         wd.end_step("test commit")
         wd.request_review()
         self.assertEqual(wd.read_state()["phase"], "review")
         self._submit_mock_reviews(wd)
         wd.approve()
-        self.assertEqual(wd.read_state()["phase"], "refactoring")
+        self.assertEqual(wd.read_state()["phase"], "approved")
         self.assertNotIn("mode", wd.read_state())
 
     def test_feedback_returns_to_idle(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.request_review()
@@ -172,11 +185,11 @@ class StateTransitionTest(TestFixture):
         wd.feedback()
         state = wd.read_state()
         self.assertEqual(state["phase"], "refactoring")
-        self.assertEqual(state["task"], "task-1")
+        self.assertEqual(state["task"], "1")
 
     def test_feedback_without_reviews_fails(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.request_review()
@@ -186,7 +199,7 @@ class StateTransitionTest(TestFixture):
 
     def test_approve_without_reviews_fails(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.request_review()
@@ -196,7 +209,7 @@ class StateTransitionTest(TestFixture):
 
     def test_end_task_after_review(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.request_review()
@@ -207,19 +220,19 @@ class StateTransitionTest(TestFixture):
 
     def test_end_task_without_review_fails(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         with self.assertRaises(ValueError):
             wd.end_task()
 
     def test_end_step_at_root_raises(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         with self.assertRaises(ValueError):
             wd.end_step("test commit")
 
     def test_end_step_failure_keeps_step_on_stack(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         # Make test.sh fail
         (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
@@ -230,7 +243,7 @@ class StateTransitionTest(TestFixture):
 
     def test_end_step_retry_after_fix(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         # Fail first
         (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
@@ -243,7 +256,7 @@ class StateTransitionTest(TestFixture):
 
     def test_abort_step_pops_without_tests(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         # Make test.sh fail — abort should still work
         (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
@@ -252,7 +265,7 @@ class StateTransitionTest(TestFixture):
 
     def test_completed_step_in_history(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Fix imports", "code")
         wd.end_step("test commit")
         history = wd._read_history()
@@ -264,7 +277,7 @@ class StateTransitionTest(TestFixture):
     def test_failed_end_step_no_history_entry(self):
         """Failed end-step doesn't record in history (step stays on stack)."""
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Bad change", "code")
         (self.test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 1\n")
         with self.assertRaises(RuntimeError):
@@ -274,7 +287,7 @@ class StateTransitionTest(TestFixture):
 
     def test_aborted_step_in_history(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Wrong approach", "code")
         wd.abort_step()
         history = wd._read_history()
@@ -283,7 +296,7 @@ class StateTransitionTest(TestFixture):
 
     def test_history_accumulates(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Step 1", "code")
         wd.end_step("test commit")
         wd.begin_refactor("Step 2", "test")
@@ -317,41 +330,41 @@ class CheckEditTest(TestFixture):
 
     def test_blocked_in_idle(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
 
     def test_code_step_allows_code(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         allowed, _ = wd.check_edit("workflow.py")
         self.assertTrue(allowed)
 
     def test_code_step_blocks_test(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         allowed, _ = wd.check_edit("test.py")
         self.assertFalse(allowed)
 
     def test_test_step_allows_test(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "test")
         allowed, _ = wd.check_edit("test.py")
         self.assertTrue(allowed)
 
     def test_test_step_blocks_code(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "test")
         allowed, _ = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
 
     def test_modify_step_allows_all(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_modify("Feature", rationale=["test: change"])
         allowed_code, _ = wd.check_edit("workflow.py")
         allowed_test, _ = wd.check_edit("test.py")
@@ -360,7 +373,7 @@ class CheckEditTest(TestFixture):
 
     def test_review_blocks_all(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.request_review()
@@ -381,28 +394,28 @@ class CheckWriteTest(TestFixture):
 
     def test_test_step_allows_new_test(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "test")
         allowed, _ = wd.check_write("test_new.py")
         self.assertTrue(allowed)
 
     def test_test_step_blocks_new_code(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "test")
         allowed, _ = wd.check_write("new_module.py")
         self.assertFalse(allowed)
 
     def test_modify_step_allows_all(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_modify("Feature", rationale=["test: change"])
         allowed, _ = wd.check_write("new_module.py")
         self.assertTrue(allowed)
 
     def test_review_blocks_all(self):
         wd = self._make_wd()
-        wd.begin_task("task-1")
+        wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.request_review()

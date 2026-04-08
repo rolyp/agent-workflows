@@ -28,6 +28,7 @@ class Phase(Enum):
     REFACTORING = "refactoring"
     MODIFYING = "modifying"
     REVIEW = "review"
+    APPROVED = "approved"
 
 
 class StepMode(Enum):
@@ -52,6 +53,7 @@ CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
 CMD_REOPEN_ISSUE = "reopen-issue"
 CMD_ADD_TO_PROJECT = "add-to-project"
+CMD_LABEL_ISSUE = "label-issue"
 CMD_RESUME_PROTOCOL = "resume-protocol"
 
 
@@ -89,7 +91,7 @@ class WorkflowDev(Workflow):
     )
 
     # Fields carried forward from previous frame unless overridden
-    _CARRY_FORWARD = ("issue_url", "reviewed_sha")
+    _CARRY_FORWARD = ("issue_url",)
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
@@ -165,18 +167,29 @@ class WorkflowDev(Workflow):
         if issue_url:
             self.clear_issue_labels(issue_url)
 
-    def _is_idle(self) -> bool:
+    def _is_task_idle(self) -> bool:
         """True if at root frame with no mode (idle within a task)."""
         stack = self._read_stack()
-        return len(stack) == 1 and self._read_phase() is Phase.REFACTORING
+        return len(stack) == 1 and self._read_phase() in (Phase.REFACTORING, Phase.APPROVED)
 
-    def begin_task(self, task: str, issue_number: str | None = None) -> None:
+    def _require_task_idle(self, command: str) -> None:
+        """Raise if not idle within a task."""
+        if not self._is_task_idle():
+            raise ValueError(f"{command} only available from idle. Run end-step first.")
+
+    def _require_phase(self, expected: Phase, command: str) -> None:
+        """Raise if not in the expected phase."""
+        phase = self._read_phase()
+        if phase is not expected:
+            raise ValueError(f"{command} only available during {expected.value} (current: {phase.value})")
+
+    def begin_task(self, issue_number: str) -> None:
         """Start or resume a task. Creates or switches to branch, sets root frame to idle."""
         phase = self._read_phase()
         if phase is not Phase.IDLE:
             raise ValueError(f"Cannot begin task: current phase is {phase.value}, expected idle")
         # Create or switch to branch
-        branch = f"task/{task}"
+        branch = f"task/{issue_number}"
         result = subprocess.run(
             ["git", "switch", branch],
             capture_output=True, text=True, cwd=self.root,
@@ -189,12 +202,10 @@ class WorkflowDev(Workflow):
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
-        issue_url = None
-        if issue_number:
-            repo = self.get_repo()
-            issue_url = f"https://github.com/{repo}/issues/{issue_number}"
-            self.set_issue_status(issue_url, "In Progress")
-        self._write_state(Phase.REFACTORING, task, issue_url=issue_url)
+        repo = self.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+        self.set_issue_status(issue_url, "In Progress")
+        self._write_state(Phase.REFACTORING, issue_number, issue_url=issue_url)
         # Clear history from previous task
         sf = self._read_state_file()
         sf["history"] = []
@@ -220,7 +231,7 @@ class WorkflowDev(Workflow):
                     rationale: list[str] | None = None) -> None:
         """Internal: push a step frame."""
         phase = self._read_phase()
-        if phase not in (Phase.REFACTORING, Phase.MODIFYING):
+        if phase not in (Phase.REFACTORING, Phase.MODIFYING, Phase.APPROVED):
             raise ValueError(f"begin-step not available in {phase.value}. Use begin-task first.")
         # Require clean working tree (excluding state.json which is workflow-managed)
         status = subprocess.run(
@@ -382,8 +393,7 @@ class WorkflowDev(Workflow):
 
     def request_review(self) -> None:
         """Request code review. Pushes branch, runs tests, checks CI."""
-        if not self._is_idle():
-            raise ValueError("request-review only available from idle. Run end-step first.")
+        self._require_task_idle("request-review")
         self._run_tests()
         # Push branch and check CI (skip if no remote)
         has_remote = subprocess.run(
@@ -398,12 +408,8 @@ class WorkflowDev(Workflow):
             if result.returncode != 0:
                 raise RuntimeError(f"Push failed: {result.stderr}")
             self._check_ci()
-        head_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=self.root,
-        ).stdout.strip()
         state = self.read_state()
-        self._write_state(Phase.REVIEW, state.get("task"), reviewed_sha=head_sha)
+        self._write_state(Phase.REVIEW, state.get("task"))
         self._set_label(self.LABEL_REVIEW)
 
     REVIEW_ROLES = ("user", "architect")
@@ -412,9 +418,7 @@ class WorkflowDev(Workflow):
         """Submit a review as a comment on the issue."""
         if role not in self.REVIEW_ROLES:
             raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
-        phase = self._read_phase()
-        if phase is not Phase.REVIEW:
-            raise ValueError(f"submit-review only available during review (current: {phase.value})")
+        self._require_phase(Phase.REVIEW, "submit-review")
         issue_url = self._issue_url_from_state()
         if not issue_url:
             raise ValueError("No issue URL in state")
@@ -442,35 +446,26 @@ class WorkflowDev(Workflow):
         submitted = state.get("reviews_submitted", [])
         return [r for r in self.REVIEW_ROLES if r not in submitted]
 
-    def approve(self) -> None:
-        """Approve review; return to idle. Requires both reviews submitted."""
-        phase = self._read_phase()
-        if phase is not Phase.REVIEW:
-            raise ValueError(f"approve only available during review (current: {phase.value})")
+    def _complete_review(self, command: str, target_phase: Phase = Phase.REFACTORING) -> None:
+        """Shared logic for approve/feedback: validate phase, check reviews, transition."""
+        self._require_phase(Phase.REVIEW, command)
         missing = self._missing_reviews()
         if missing:
             raise ValueError(
-                f"Cannot approve: missing reviews from {', '.join(missing)}. "
+                f"Cannot {command}: missing reviews from {', '.join(missing)}. "
                 f"Use `submit-review <role> <content>` first."
             )
         state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"))
+        self._write_state(target_phase, state.get("task"))
         self._set_label(self.LABEL_IDLE)
+
+    def approve(self) -> None:
+        """Approve review; transition to approved. Requires both reviews submitted."""
+        self._complete_review("respond-review/approve", Phase.APPROVED)
 
     def feedback(self, items: list[str] | None = None) -> None:
         """Review feedback; return to idle. Requires reviews to have been submitted."""
-        phase = self._read_phase()
-        if phase is not Phase.REVIEW:
-            raise ValueError(f"feedback only available during review (current: {phase.value})")
-        missing = self._missing_reviews()
-        if missing:
-            raise ValueError(
-                f"Cannot provide feedback: missing reviews from {', '.join(missing)}. "
-                f"Use `submit-review <role> <content>` first."
-            )
-        state = self.read_state()
-        self._write_state(Phase.REFACTORING, state.get("task"))
-        self._set_label(self.LABEL_IDLE)
+        self._complete_review("respond-review/feedback")
         if items:
             issue_url = self._issue_url_from_state()
             if issue_url:
@@ -486,24 +481,8 @@ class WorkflowDev(Workflow):
                 self._write_issue_body(issue_url, body)
 
     def end_task(self) -> None:
-        """Complete the current task. Requires review since last code change."""
-        if not self._is_idle():
-            raise ValueError("end-task only available from idle. Run end-step first.")
-
-        state = self.read_state()
-        reviewed_sha = state.get("reviewed_sha")
-        if not reviewed_sha:
-            raise ValueError("No review on record. Run request-review first.")
-
-        head_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=self.root,
-        ).stdout.strip()
-        if head_sha != reviewed_sha:
-            raise ValueError(
-                f"Code changed since last review (reviewed: {reviewed_sha[:8]}, "
-                f"HEAD: {head_sha[:8]}). Run request-review again."
-            )
+        """Complete the current task. Requires approved review."""
+        self._require_phase(Phase.APPROVED, "end-task")
 
         # Merge branch to main (skip if already on main or no remote)
         branch = subprocess.run(
@@ -548,8 +527,7 @@ class WorkflowDev(Workflow):
 
     def suspend_task(self) -> None:
         """Park the current task. Switches to main, sets issue to Planned."""
-        if not self._is_idle():
-            raise ValueError("suspend-task only available from idle. Run end-step first.")
+        self._require_task_idle("suspend-task")
         # Require clean working tree
         status = subprocess.run(
             ["git", "status", "--porcelain", "--", ".", ":!state.json"],
@@ -572,15 +550,32 @@ class WorkflowDev(Workflow):
 
     # --- Protocol suspension ---
 
+    def is_protocol_suspended(self) -> bool:
+        """Check if protocol mode is suspended."""
+        sf = self._read_state_file()
+        return sf.get("protocol_suspended", False)
+
+    def _suspend_protocol(self) -> None:
+        """Suspend protocol mode. Developer-only — not exposed via CLI."""
+        sf = self._read_state_file()
+        sf["protocol_suspended"] = True
+        self._write_state_file(sf)
+
     def resume_protocol(self) -> None:
         """Resume protocol mode."""
         sf = self._read_state_file()
         sf.pop("protocol_suspended", None)
         self._write_state_file(sf)
 
+    def _approve_task(self) -> None:
+        """Set current task to approved. Developer-only — not exposed via CLI."""
+        self._require_task_idle("approve-task")
+        state = self.read_state()
+        self._write_state(Phase.APPROVED, state.get("task"))
+
     # --- Hook gates ---
 
-    def _check_file_access(self, rel_path: str) -> tuple[bool, str]:
+    def check_file_access(self, rel_path: str) -> tuple[bool, str]:
         """Shared gate logic for check_edit and check_write."""
         phase = self._read_phase()
         state = self.read_state()
@@ -592,7 +587,7 @@ class WorkflowDev(Workflow):
         if phase is Phase.REVIEW:
             return False, "Edits blocked during review."
 
-        if phase is Phase.REFACTORING and not mode:
+        if phase in (Phase.REFACTORING, Phase.APPROVED) and not mode:
             return False, f"Idle — no step active. Use `{CMD_BEGIN_REFACTOR} <desc> <code|test>` or `{CMD_BEGIN_MODIFY} <desc> <rationale...>`."
 
         if mode == StepMode.CODE.value:
@@ -611,14 +606,14 @@ class WorkflowDev(Workflow):
         rel_path = self._resolve(file_path)
         if rel_path is None:
             return True, ""
-        return self._check_file_access(rel_path)
+        return self.check_file_access(rel_path)
 
     def check_write(self, file_path: str) -> tuple[bool, str]:
         """Gate file creation based on current step mode."""
         rel_path = self._resolve(file_path)
         if rel_path is None:
             return True, ""
-        return self._check_file_access(rel_path)
+        return self.check_file_access(rel_path)
 
     # --- Helpers ---
 
@@ -734,14 +729,10 @@ def main() -> None:
         print(summary)
     elif command == CMD_BEGIN_TASK:
         if len(sys.argv) < 3:
-            print(f"Usage: workflow.py {CMD_BEGIN_TASK} <task-name> [issue-number]", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_BEGIN_TASK} <issue-number>", file=sys.stderr)
             sys.exit(1)
-        issue_number = sys.argv[3] if len(sys.argv) > 3 else None
-        wd.begin_task(sys.argv[2], issue_number)
-        msg = f"Task started: {sys.argv[2]} (idle)"
-        if issue_number:
-            msg += f" · issue #{issue_number} → In Progress"
-        print(msg)
+        wd.begin_task(sys.argv[2])
+        print(f"Task started: #{sys.argv[2]} (idle)")
     elif command == CMD_SUSPEND_TASK:
         wd.suspend_task()
         print("Task suspended; back to main")
@@ -820,6 +811,15 @@ def main() -> None:
         status = args[1] if len(args) > 1 else "Proposed"
         wd.add_to_project(issue_url, status)
         print(f"Added #{args[0]} to project as {status}")
+    elif command == CMD_LABEL_ISSUE:
+        args = sys.argv[2:]
+        if len(args) < 2:
+            print(f"Usage: workflow.py {CMD_LABEL_ISSUE} <issue-number> <label>", file=sys.stderr)
+            sys.exit(1)
+        repo = wd.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{args[0]}"
+        wd.add_label(issue_url, args[1])
+        print(f"Labelled #{args[0]} with '{args[1]}'")
     elif command == CMD_RESUME_PROTOCOL:
         wd.resume_protocol()
         print("Protocol resumed.")
