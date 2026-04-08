@@ -6,10 +6,14 @@ Suspend with: ! python3 scripts/suspend-protocol.py
 Resume with: python3 src/workflow_dev/workflow.py resume-protocol
 """
 
-import json
-import re
 import sys
 from pathlib import Path
+
+# Add agent-workflows root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+import json
+from workflow_dev.workflow import WorkflowDev
 
 
 # Read-only command prefixes (always allowed)
@@ -41,25 +45,6 @@ def _is_whitelisted(command: str) -> bool:
     return False
 
 
-def _is_protocol_suspended() -> bool:
-    """Check if protocol is suspended via state.json flag."""
-    for state_path in [Path("state.json"), Path.cwd() / "state.json"]:
-        if state_path.exists():
-            try:
-                sf = json.loads(state_path.read_text())
-                if isinstance(sf, dict):
-                    return sf.get("protocol_suspended", False)
-            except (json.JSONDecodeError, OSError):
-                pass
-    return False
-
-
-# Add agent-workflows root to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from workflow_dev.workflow import WorkflowDev
-
-
 def main() -> None:
     tool_input = json.load(sys.stdin)
     command = tool_input.get("tool_input", {}).get("command", "")
@@ -67,7 +52,8 @@ def main() -> None:
     if not command:
         return
 
-    if _is_protocol_suspended():
+    wd = WorkflowDev(Path.cwd())
+    if wd.is_protocol_suspended():
         return
 
     if _is_whitelisted(command):
