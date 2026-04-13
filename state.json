@@ -1,16 +1,16 @@
 {
   "stack": [
     {
-      "phase": "refactoring",
+      "phase": "approved",
       "task": "76",
       "issue_url": "https://github.com/rolyp/agent-workflows/issues/76"
-    },
-    {
-      "phase": "refactoring",
-      "task": "76",
-      "step": "[refactor/code] Targeted state.json commits before branch switches",
-      "mode": "code"
     }
   ],
-  "history": []
+  "history": [
+    {
+      "step": "[refactor/code] Targeted state.json commits before branch switches",
+      "status": "completed",
+      "commit": "5baea63812cf8070b63f1fc7ff96ab3dca7ccf14"
+    }
+  ]
 }
