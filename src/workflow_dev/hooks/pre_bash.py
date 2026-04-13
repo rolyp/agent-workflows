@@ -6,48 +6,14 @@ Suspend with: ! python3 scripts/suspend-protocol.py
 Resume with: python3 src/workflow_dev/workflow.py resume-protocol
 """
 
+import json
 import sys
 from pathlib import Path
 
 # Add agent-workflows root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import json
 from workflow_dev.workflow import WorkflowDev
-
-
-# Read-only command prefixes (always allowed)
-READ_ONLY = (
-    "git log", "git status", "git diff", "git show",
-    "git branch", "git remote", "git fetch",
-    "cat ", "head ", "tail ", "ls", "wc ", "find ",
-    "grep ", "rg ", "echo ",
-    "python3 -m pytest",
-    "gh issue view",
-    "gh issue list",
-    "gh pr view",
-    "gh run view",
-    "gh run list",
-    "gh project view",
-    "gh project list",
-    "gh project field-list",
-    "gh project item-list",
-    "gh auth status",
-)
-
-# Workflow commands (always allowed)
-WORKFLOW = (
-    "python3 src/workflow_dev/workflow.py",
-    "bash test/test.sh",
-)
-
-def _is_whitelisted(command: str) -> bool:
-    """Check if a command matches the whitelist."""
-    cmd = command.strip()
-    for prefix in READ_ONLY + WORKFLOW:
-        if cmd.startswith(prefix):
-            return True
-    return False
 
 
 def main() -> None:
@@ -61,31 +27,10 @@ def main() -> None:
     if wd.is_protocol_suspended():
         return
 
-    if _is_whitelisted(command):
-        return
-
-    # Gate rm commands via the same file-access check as Edit/Write
-    cmd = command.strip()
-    if cmd.startswith("rm "):
-        for path in cmd[3:].split():
-            if path.startswith("-"):
-                continue
-            rel_path = wd._resolve(path)
-            if rel_path is None:
-                continue
-            allowed, message = wd.check_file_access(rel_path)
-            if not allowed:
-                print(message, file=sys.stderr)
-                sys.exit(2)
-        return
-
-    print(
-        f"Command blocked by protocol: {command[:80]}...\n"
-        "Only read-only commands and workflow.py commands are allowed.\n"
-        "Ask the Developer to suspend the protocol if needed.",
-        file=sys.stderr,
-    )
-    sys.exit(2)
+    allowed, message = wd.check_bash(command)
+    if not allowed:
+        print(message, file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":
