@@ -394,6 +394,19 @@ class Workflow(ABC):
             raise RuntimeError(f"Failed to reopen issue: {result.stderr}")
         self.set_issue_status(issue_url, "In Progress")
 
+    def open_blockers(self, issue_url: str) -> list[dict]:
+        """Return open issues that block this issue (via blocked-by dependency)."""
+        owner, repo_name, number = self._parse_issue_url(issue_url)
+        env = self._gh_env()
+        result = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo_name}/issues/{number}/dependencies/blocked_by",
+             "--jq", '[.[] | select(.state == "open") | {number, title, url: .html_url}]'],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            return []  # API may not be available; fail open
+        return json.loads(result.stdout) if result.stdout.strip() else []
+
     # --- Issue label management ---
 
     # Subclasses must define their own labels and WORKFLOW_LABELS tuple.

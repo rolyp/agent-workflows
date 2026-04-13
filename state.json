@@ -2,13 +2,13 @@
   "stack": [
     {
       "phase": "refactoring",
-      "task": "73",
-      "issue_url": "https://github.com/rolyp/agent-workflows/issues/73"
+      "task": "50",
+      "issue_url": "https://github.com/rolyp/agent-workflows/issues/50"
     },
     {
       "phase": "refactoring",
-      "task": "73",
-      "step": "[refactor/code] Clean up .gitignore",
+      "task": "50",
+      "step": "[refactor/code] Add open_blockers method to query blocked-by dependencies",
       "mode": "code"
     }
   ],
