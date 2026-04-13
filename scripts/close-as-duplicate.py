@@ -40,9 +40,9 @@ subprocess.run(
 
 # Update project status
 try:
-    wd.set_issue_status(issue_url, "Done")
+    wd.set_issue_status(issue_url, "Rejected")
     wd.clear_issue_labels(issue_url)
-except Exception:
-    pass
+except Exception as e:
+    print(f"Warning: could not update project status: {e}", file=sys.stderr)
 
 print(f"Issue #{issue_number} closed as duplicate of #{duplicate_of}.")
