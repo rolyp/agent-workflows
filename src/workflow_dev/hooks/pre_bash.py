@@ -32,6 +32,7 @@ READ_ONLY = (
     "gh project list",
     "gh project field-list",
     "gh project item-list",
+    "gh auth status",
 )
 
 # Workflow commands (always allowed)
