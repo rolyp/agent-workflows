@@ -368,7 +368,7 @@ class PaperAuthoring(Workflow):
                 repo = self.get_repo()
                 sub_url = f"https://github.com/{repo}/issues/{issue_number}"
                 if parent_url:
-                    self.create_sub_issue(parent_url, sub_url)
+                    self.link_sub_issue(parent_url, sub_url)
                 subtask_entry["issue_url"] = sub_url
             except Exception as e:
                 print(f"GitHub operation failed: {e}", file=sys.stderr)

@@ -607,24 +607,29 @@ class Workflow(ABC):
 
     # --- Sub-issue management ---
 
-    def create_sub_issue(self, parent_url: str, title: str, body: str = "") -> str:
-        """Create a sub-issue under a parent issue. Returns the new issue URL."""
-        issue_url = self.create_issue(title, body)
-        # Link as sub-issue via GitHub's sub-issue API
+    def link_sub_issue(self, parent_url: str, child_url: str) -> None:
+        """Link an existing issue as a sub-issue of a parent."""
         parent_number = self._get_issue_number(parent_url)
-        child_number = self._get_issue_number(issue_url)
-        repo = self.get_repo()
-        env = self._gh_env()
-        # Use the REST API to add sub-issue relationship
+        child_id = self._get_issue_id(child_url)
         owner, repo_name, _ = self._parse_issue_url(parent_url)
+        env = self._gh_env()
         result = subprocess.run(
             ["gh", "api", "--method", "POST",
              f"repos/{owner}/{repo_name}/issues/{parent_number}/sub_issues",
-             "-f", f"sub_issue_id={child_number}"],
+             "-F", f"sub_issue_id={child_id}"],
             capture_output=True, text=True, env=env,
         )
         if result.returncode != 0:
-            # Sub-issues API may not be available; fall back to mentioning in body
+            raise RuntimeError(f"Failed to link sub-issue: {result.stderr}")
+
+    def create_sub_issue(self, parent_url: str, title: str, body: str = "") -> str:
+        """Create a new issue and link it as a sub-issue. Returns the new issue URL."""
+        issue_url = self.create_issue(title, body)
+        try:
+            self.link_sub_issue(parent_url, issue_url)
+        except RuntimeError:
+            # Fall back to mentioning parent in body
+            parent_number = self._get_issue_number(parent_url)
             child_body = self._read_issue_body(issue_url)
             child_body = f"Parent: #{parent_number}\n\n{child_body}" if child_body else f"Parent: #{parent_number}"
             self._write_issue_body(issue_url, child_body)
