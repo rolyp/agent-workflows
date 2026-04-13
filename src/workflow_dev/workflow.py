@@ -189,6 +189,13 @@ class WorkflowDev(Workflow):
         phase = self._read_phase()
         if phase is not Phase.IDLE:
             raise ValueError(f"Cannot begin task: current phase is {phase.value}, expected idle")
+        # Check for open blockers
+        repo = self.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+        blockers = self.open_blockers(issue_url)
+        if blockers:
+            blocker_list = ", ".join(f"#{b['number']}" for b in blockers)
+            raise ValueError(f"Issue #{issue_number} is blocked by open issues: {blocker_list}")
         # Create or switch to branch
         branch = f"task/{issue_number}"
         result = subprocess.run(
@@ -203,8 +210,6 @@ class WorkflowDev(Workflow):
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
-        repo = self.get_repo()
-        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
         self.set_issue_status(issue_url, "In Progress")
         self._write_state(Phase.REFACTORING, issue_number, issue_url=issue_url)
         # Clear history from previous task
