@@ -16,10 +16,10 @@ from enum import Enum
 from pathlib import Path
 
 # Ensure parent directory is on path when run as script
-if __name__ == "__main__" or "base" not in sys.modules:
+if __name__ == "__main__" or "workflow" not in sys.modules:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from base import Workflow, ValidationError
+from workflow import Workflow, ValidationError
 
 
 
@@ -101,9 +101,12 @@ class PaperAuthoring(Workflow):
     def assert_valid(self) -> None:
         errors = []
         errors += self._state_file_exists()
-        errors += self._no_orphaned_markers()
-        errors += self._markers_do_not_coexist()
-        errors += self._state_consistent_with_markers()
+        # Compute marker census once
+        edit_files = self._tex_files_containing(EDIT_START)
+        review_files = self._tex_files_containing(REVIEW_START)
+        errors += self._no_orphaned_markers(edit_files, review_files)
+        errors += self._markers_do_not_coexist(edit_files, review_files)
+        errors += self._state_consistent_with_markers(edit_files, review_files)
         if errors:
             raise ValidationError(errors)
 
@@ -112,26 +115,29 @@ class PaperAuthoring(Workflow):
             return ["workflow/state.json does not exist"]
         return []
 
-    def _no_orphaned_markers(self) -> list[str]:
+    def _no_orphaned_markers(self, edit_files: list[str],
+                             review_files: list[str]) -> list[str]:
         phase = self._read_phase()
         if phase not in (Phase.IDLE, Phase.TRIAGE):
             return []
         errors = []
-        if self._tex_files_containing(EDIT_START):
+        if edit_files:
             errors.append(f"State is '{phase.value}' but {EDIT_START} markers found in .tex files")
-        if self._tex_files_containing(REVIEW_START):
+        if review_files:
             errors.append(f"State is '{phase.value}' but {REVIEW_START} markers found in .tex files")
         return errors
 
-    def _markers_do_not_coexist(self) -> list[str]:
-        if self._tex_files_containing(EDIT_START) and self._tex_files_containing(REVIEW_START):
+    def _markers_do_not_coexist(self, edit_files: list[str],
+                                review_files: list[str]) -> list[str]:
+        if edit_files and review_files:
             return [f"Both {EDIT_START} and {REVIEW_START} markers present — should not coexist"]
         return []
 
-    def _state_consistent_with_markers(self) -> list[str]:
+    def _state_consistent_with_markers(self, edit_files: list[str],
+                                       review_files: list[str]) -> list[str]:
         phase = self._read_phase()
-        has_edit = bool(self._tex_files_containing(EDIT_START))
-        has_review = bool(self._tex_files_containing(REVIEW_START))
+        has_edit = bool(edit_files)
+        has_review = bool(review_files)
         errors = []
         if phase is Phase.EDIT and not has_edit:
             errors.append("State is 'edit' but no edit bars found in .tex files")
@@ -251,12 +257,8 @@ class PaperAuthoring(Workflow):
         self._write_state(Phase.EDIT, issue_number, regions=regions,
                           description=description, issue_url=issue_url)
         # Update GitHub
-        if issue_url:
-            try:
-                self.set_issue_status(issue_url, "In Progress")
-                self.set_issue_label(issue_url, self.LABEL_EDIT)
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+        self.set_issue_status(issue_url, "In Progress")
+        self.set_issue_label(issue_url, self.LABEL_EDIT)
 
     def begin_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
@@ -320,10 +322,7 @@ class PaperAuthoring(Workflow):
             self._pop_state(validate=False)
             # Close sub-issue if linked
             if subtask_url:
-                try:
-                    self.close_issue(subtask_url)
-                except Exception:
-                    pass
+                self.close_issue(subtask_url)
             # Mark subtask as completed in parent's list
             parent_stack = self._read_stack()
             for st in parent_stack[-1].get("subtasks", []):
@@ -342,10 +341,7 @@ class PaperAuthoring(Workflow):
             state = self.read_state()
             issue_url = state.get("issue_url")
             if issue_url:
-                try:
-                    self.close_issue(issue_url)
-                except Exception:
-                    pass
+                self.close_issue(issue_url)
             self._write_state(Phase.IDLE)
 
     # --- Subtasks ---
@@ -364,21 +360,15 @@ class PaperAuthoring(Workflow):
         subtask_entry: dict[str, object] = {"id": subtask_id, "description": description}
         if issue_number:
             # Link existing issue
-            try:
-                repo = self.get_repo()
-                sub_url = f"https://github.com/{repo}/issues/{issue_number}"
-                if parent_url:
-                    self.create_sub_issue(parent_url, sub_url)
-                subtask_entry["issue_url"] = sub_url
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            repo = self.get_repo()
+            sub_url = f"https://github.com/{repo}/issues/{issue_number}"
+            if parent_url:
+                self.link_sub_issue(parent_url, sub_url)
+            subtask_entry["issue_url"] = sub_url
         elif parent_url:
             # Create new sub-issue
-            try:
-                sub_url = self.create_sub_issue(parent_url, description)
-                subtask_entry["issue_url"] = sub_url
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            sub_url = self.create_sub_issue(parent_url, description)
+            subtask_entry["issue_url"] = sub_url
         subtasks = list(frame.get("subtasks", []))
         subtasks.append(subtask_entry)
         frame["subtasks"] = subtasks
@@ -405,11 +395,8 @@ class PaperAuthoring(Workflow):
                          issue_url=subtask_url)
         # Set sub-issue to In Progress
         if subtask_url:
-            try:
-                self.set_issue_status(subtask_url, "In Progress")
-                self.set_issue_label(subtask_url, self.LABEL_EDIT)
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            self.set_issue_status(subtask_url, "In Progress")
+            self.set_issue_label(subtask_url, self.LABEL_EDIT)
 
 
     # --- Bar operations (require active task) ---
@@ -445,10 +432,7 @@ class PaperAuthoring(Workflow):
         self._write_state(Phase.AUTHOR_REVIEW, task)
         issue_url = state.get("issue_url")
         if issue_url:
-            try:
-                self.set_issue_label(issue_url, self.LABEL_REVIEW)
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            self.set_issue_label(issue_url, self.LABEL_REVIEW)
 
     def review_to_edit(self) -> None:
         """Swap all review bars to edit bars; transition to edit phase."""
@@ -463,14 +447,11 @@ class PaperAuthoring(Workflow):
         self._write_state(Phase.EDIT, task)
         issue_url = state.get("issue_url")
         if issue_url:
-            try:
-                self.set_issue_label(issue_url, self.LABEL_EDIT)
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            self.set_issue_label(issue_url, self.LABEL_EDIT)
 
     def _build(self) -> None:
         """Run the build script if it exists."""
-        build_script = self.root / "workflow" / "agent-workflows" / "paper_authoring" / "build.sh"
+        build_script = self.root / "workflow" / "agent-workflows" / "src" / "paper_authoring" / "build.sh"
         if build_script.exists():
             result = subprocess.run(
                 ["bash", str(build_script)],
@@ -627,6 +608,18 @@ class PaperAuthoring(Workflow):
             )
         return True, ""
 
+    def check_bash(self, command: str) -> tuple[bool, str]:
+        """Gate shell commands: block writes to protected files via shell."""
+        cmd = command.strip()
+        # Detect common shell write patterns targeting protected files
+        for protected in PROTECTED_FILES:
+            if protected in cmd:
+                return False, (
+                    f"Cannot modify {protected} via shell. "
+                    "Use PaperAuthoring commands."
+                )
+        return True, ""
+
     # --- Helpers ---
 
     def _text_within_bars(self, content: str, text: str,
@@ -752,9 +745,10 @@ def main() -> None:
         print("Plan approved; returning to edit phase")
     elif command == CMD_ADD_SUBTASK:
         if len(sys.argv) < 4:
-            print(f"Usage: workflow.py {CMD_ADD_SUBTASK} <subtask-id> <description>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_ADD_SUBTASK} <subtask-id> <description> [issue-number]", file=sys.stderr)
             sys.exit(1)
-        workflow.add_subtask(sys.argv[2], sys.argv[3])
+        issue_num = sys.argv[4] if len(sys.argv) > 4 else None
+        workflow.add_subtask(sys.argv[2], sys.argv[3], issue_number=issue_num)
         print(f"Added subtask: {sys.argv[2]}")
     elif command == CMD_BEGIN_SUBTASK:
         if len(sys.argv) < 4:

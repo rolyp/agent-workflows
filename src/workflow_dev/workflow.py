@@ -17,10 +17,10 @@ from enum import Enum
 from pathlib import Path
 
 # Ensure parent directory is on path when run as script
-if __name__ == "__main__" or "base" not in sys.modules:
+if __name__ == "__main__" or "workflow" not in sys.modules:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from base import Workflow
+from workflow import Workflow
 
 
 class Phase(Enum):
@@ -93,6 +93,35 @@ class WorkflowDev(Workflow):
 
     # Fields carried forward from previous frame unless overridden
     _CARRY_FORWARD = ("issue_url",)
+
+    # Bash whitelist: commands always permitted in protocol mode
+    _BASH_READ_ONLY = (
+        "git log", "git status", "git diff", "git show",
+        "git branch", "git remote", "git fetch",
+        "cat ", "head ", "tail ", "ls", "wc ", "find ",
+        "grep ", "rg ", "echo ",
+        "python3 -m pytest",
+        "gh issue view",
+        "gh issue list",
+        "gh pr view",
+        "gh run view",
+        "gh run list",
+        "gh project view",
+        "gh project list",
+        "gh project field-list",
+        "gh project item-list",
+        "gh auth status",
+    )
+    _BASH_WORKFLOW = (
+        "python3 src/workflow_dev/workflow.py",
+        "bash test/test.sh",
+    )
+
+    def _is_whitelisted(self, command: str) -> bool:
+        for prefix in self._BASH_READ_ONLY + self._BASH_WORKFLOW:
+            if command.startswith(prefix):
+                return True
+        return False
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
@@ -306,7 +335,9 @@ class WorkflowDev(Workflow):
             sf["stack"][-1]["end_step_failed"] = True
             self._save_stack(sf["stack"], history=sf["history"])
             raise
-        # Stage and commit
+        # Stage and commit. git add -A is safe here: sensitive files (e.g.
+        # settings.local.json) must be covered by .gitignore, which is a
+        # pre-condition of using the workflow — not something we can enforce here.
         subprocess.run(
             ["git", "add", "-A"], capture_output=True, cwd=self.root,
         )
@@ -637,6 +668,28 @@ class WorkflowDev(Workflow):
         if rel_path is None:
             return True, ""
         return self.check_file_access(rel_path)
+
+    def check_bash(self, command: str) -> tuple[bool, str]:
+        """Gate shell commands: whitelist read-only and workflow commands; gate rm via check_file_access."""
+        cmd = command.strip()
+        if self._is_whitelisted(cmd):
+            return True, ""
+        if cmd.startswith("rm "):
+            for path in cmd[3:].split():
+                if path.startswith("-"):
+                    continue
+                rel_path = self._resolve(path)
+                if rel_path is None:
+                    continue
+                allowed, message = self.check_file_access(rel_path)
+                if not allowed:
+                    return False, message
+            return True, ""
+        return False, (
+            f"Command blocked by protocol: {command[:80]}\n"
+            "Only read-only commands and workflow.py commands are allowed.\n"
+            "Ask the Developer to suspend the protocol if needed."
+        )
 
     # --- Helpers ---
 
