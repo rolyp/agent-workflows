@@ -622,7 +622,12 @@ class WorkflowDev(Workflow):
 
     def _approve_task(self) -> None:
         """Set current task to approved. Developer-only — not exposed via CLI."""
-        self._require_phase(Phase.REFACTORING, "approve-task")
+        phase = self._read_phase()
+        if phase not in (Phase.REFACTORING, Phase.REVIEW):
+            raise ValueError(
+                f"approve-task requires an active task in refactoring or review phase "
+                f"(current: {phase.value})"
+            )
         state = self.read_state()
         self._write_state(Phase.APPROVED, state.get("task"))
         self._commit_state("state: approved")
