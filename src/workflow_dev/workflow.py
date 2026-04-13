@@ -96,12 +96,19 @@ class WorkflowDev(Workflow):
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
-        """Replace top frame, carrying forward issue_url."""
+        """Replace top frame, carrying forward issue_url. Commits state.json."""
         prev = self.read_state()
         for key in self._CARRY_FORWARD:
             if key not in extra and key in prev:
                 extra[key] = prev[key]
         super()._write_state(phase, task, **extra)
+        subprocess.run(
+            ["git", "add", "state.json"], capture_output=True, cwd=self.root,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"state: {phase.value}"],
+            capture_output=True, cwd=self.root,
+        )
 
     def _label_for_state(self, state: dict) -> str:
         """Derive the appropriate label from a state frame."""
@@ -489,10 +496,12 @@ class WorkflowDev(Workflow):
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
         if branch and branch != "main":
-            subprocess.run(
+            result = subprocess.run(
                 ["git", "checkout", "main"],
                 capture_output=True, text=True, cwd=self.root,
             )
+            if result.returncode != 0:
+                raise RuntimeError(f"Failed to checkout main: {result.stderr}")
             result = subprocess.run(
                 ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
                 capture_output=True, text=True, cwd=self.root,
@@ -503,6 +512,13 @@ class WorkflowDev(Workflow):
                     capture_output=True, cwd=self.root,
                 )
                 raise RuntimeError(f"Merge failed: {result.stderr}")
+            # Assert we're on main
+            current = subprocess.run(
+                ["git", "branch", "--show-current"],
+                capture_output=True, text=True, cwd=self.root,
+            ).stdout.strip()
+            if current != "main":
+                raise RuntimeError(f"Expected to be on main after merge, but on {current}")
             # Push main if remote exists
             has_remote = subprocess.run(
                 ["git", "remote", "get-url", "origin"],
