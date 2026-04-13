@@ -1,15 +1,9 @@
 {
   "stack": [
     {
-      "phase": "refactoring",
-      "task": "74",
+      "phase": "idle",
+      "task": null,
       "issue_url": "https://github.com/rolyp/agent-workflows/issues/74"
-    },
-    {
-      "phase": "refactoring",
-      "task": "74",
-      "step": "[refactor/code] Add gh auth to bash whitelist",
-      "mode": "code"
     }
   ],
   "history": [
@@ -17,6 +11,11 @@
       "step": "[refactor/code] Make open_blockers fail closed instead of open",
       "status": "completed",
       "commit": "386a263c2703fabdea45941a2e151a34f345403b"
+    },
+    {
+      "step": "[refactor/code] Add gh auth to bash whitelist",
+      "status": "completed",
+      "commit": "3bb038bd581b01bcbb19530fb6e0c2ffc26341e1"
     }
   ]
 }
