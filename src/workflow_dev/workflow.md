@@ -86,12 +86,12 @@ no task ──begin-task──► idle (root frame, edits locked)
          approve        feedback [items...]
                │          │
                ▼          ▼
-              idle        idle (items added as todos)
-                   │
-              end-task (requires reviewed_sha = HEAD)
-                   │
-                   ▼
-              no task (issue closed)
+           approved      idle (items added as todos)
+               │
+          end-task
+               │
+               ▼
+          no task (issue closed)
 ```
 
 ### Step modes
@@ -106,18 +106,34 @@ Each `begin-step` specifies a mode that gates file access:
 
 Idle (no step active): all edits locked. Review: all edits locked.
 
+### Editing patterns
+
+Observed patterns and how they map to step modes. These will evolve.
+
+| Pattern | What changes | Step mode | Constraint |
+|---------|-------------|-----------|------------|
+| **Additive refactoring** | New code + new tests | refactor/code then refactor/test | Nothing existing changes; additions are safe independently |
+| **Coverage improvement** | New tests only | refactor/test | New tests must pass against existing code — they document what already works |
+| **Behaviour removal** | Delete code + delete tests | modify | Removed tests must only test removed code |
+| **Behaviour modification** | Change code + change existing tests | modify | Rationale links each test change to the code change |
+
+Notes:
+- Additive refactoring currently requires two steps (code then test) due to the code/test firewall. Both steps are individually safe.
+- Behaviour removal is not backwards-compatible, so requires modify — even though nothing is being *changed*, only eliminated.
+- Purely adding tests before a change is a valuable preparatory step: it establishes witnesses that validate subsequent refactorings.
+
 ### Commands
 
 | Command | Effect | Gate |
 |---------|--------|------|
-| `begin-task <name> [issue#]` | Set root frame; issue → In Progress | No active task |
+| `begin-task <issue#>` | Set root frame; issue → In Progress | No active task |
 | `begin-step <desc> <code\|test\|modify>` | Push step frame | Not in failed state |
 | `end-step` | Pop frame; check off todo with commit link | Tests must pass |
 | `abort-step` | Pop frame without tests; todo left unchecked | — |
 | `request-review` | Enter review | Idle (root frame); tests + CI pass |
 | `respond-review/approve` | Return to idle | In review |
 | `respond-review/feedback [items...]` | Return to idle; add todos | In review |
-| `end-task` | Close issue; return to no task | Idle; reviewed_sha = HEAD |
+| `end-task` | Close issue; return to no task | Phase = approved |
 
 ### Failure handling
 
