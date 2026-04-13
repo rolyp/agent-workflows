@@ -418,7 +418,7 @@ class Workflow(ABC):
             capture_output=True, text=True, env=env,
         )
         if result.returncode != 0:
-            return []  # API may not be available; fail open
+            raise RuntimeError(f"Failed to check blockers: {result.stderr}")
         return json.loads(result.stdout) if result.stdout.strip() else []
 
     # --- Issue label management ---

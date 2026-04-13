@@ -1,16 +1,16 @@
 {
   "stack": [
     {
-      "phase": "approved",
-      "task": "76",
-      "issue_url": "https://github.com/rolyp/agent-workflows/issues/76"
+      "phase": "refactoring",
+      "task": "74",
+      "issue_url": "https://github.com/rolyp/agent-workflows/issues/74"
+    },
+    {
+      "phase": "refactoring",
+      "task": "74",
+      "step": "[refactor/code] Make open_blockers fail closed instead of open",
+      "mode": "code"
     }
   ],
-  "history": [
-    {
-      "step": "[refactor/code] Targeted state.json commits before branch switches",
-      "status": "completed",
-      "commit": "5baea63812cf8070b63f1fc7ff96ab3dca7ccf14"
-    }
-  ]
+  "history": []
 }
