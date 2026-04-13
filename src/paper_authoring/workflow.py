@@ -101,9 +101,12 @@ class PaperAuthoring(Workflow):
     def assert_valid(self) -> None:
         errors = []
         errors += self._state_file_exists()
-        errors += self._no_orphaned_markers()
-        errors += self._markers_do_not_coexist()
-        errors += self._state_consistent_with_markers()
+        # Compute marker census once
+        edit_files = self._tex_files_containing(EDIT_START)
+        review_files = self._tex_files_containing(REVIEW_START)
+        errors += self._no_orphaned_markers(edit_files, review_files)
+        errors += self._markers_do_not_coexist(edit_files, review_files)
+        errors += self._state_consistent_with_markers(edit_files, review_files)
         if errors:
             raise ValidationError(errors)
 
@@ -112,26 +115,29 @@ class PaperAuthoring(Workflow):
             return ["workflow/state.json does not exist"]
         return []
 
-    def _no_orphaned_markers(self) -> list[str]:
+    def _no_orphaned_markers(self, edit_files: list[str],
+                             review_files: list[str]) -> list[str]:
         phase = self._read_phase()
         if phase not in (Phase.IDLE, Phase.TRIAGE):
             return []
         errors = []
-        if self._tex_files_containing(EDIT_START):
+        if edit_files:
             errors.append(f"State is '{phase.value}' but {EDIT_START} markers found in .tex files")
-        if self._tex_files_containing(REVIEW_START):
+        if review_files:
             errors.append(f"State is '{phase.value}' but {REVIEW_START} markers found in .tex files")
         return errors
 
-    def _markers_do_not_coexist(self) -> list[str]:
-        if self._tex_files_containing(EDIT_START) and self._tex_files_containing(REVIEW_START):
+    def _markers_do_not_coexist(self, edit_files: list[str],
+                                review_files: list[str]) -> list[str]:
+        if edit_files and review_files:
             return [f"Both {EDIT_START} and {REVIEW_START} markers present — should not coexist"]
         return []
 
-    def _state_consistent_with_markers(self) -> list[str]:
+    def _state_consistent_with_markers(self, edit_files: list[str],
+                                       review_files: list[str]) -> list[str]:
         phase = self._read_phase()
-        has_edit = bool(self._tex_files_containing(EDIT_START))
-        has_review = bool(self._tex_files_containing(REVIEW_START))
+        has_edit = bool(edit_files)
+        has_review = bool(review_files)
         errors = []
         if phase is Phase.EDIT and not has_edit:
             errors.append("State is 'edit' but no edit bars found in .tex files")
