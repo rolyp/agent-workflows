@@ -1,6 +1,6 @@
 # Paper Authoring Workflow
 
-Follow whenever agent team is started on paper. See [dashboard](../../dashboard.md) for task status and [workflow diagram](workflow-diagram.md) for visual overview.
+Follow whenever agent team is started on paper. See [GitHub Issues](https://github.com/explorable-viz/literate-execution/issues) for task tracking and [workflow diagram](workflow-diagram.md) for visual overview.
 
 ## Roles
 
@@ -48,7 +48,7 @@ Foreground subagents block **Author Assistant** until they return. Workflow stat
 - Work on children before parents
 - Keep completed subtasks under parent (strikethrough) until entire parent is **Done**; move whole tree to **Done** together
 - **Author** may identify new subtasks at any time
-- Task status lives in the dashboard only. Plans describe strategy, not status
+- Task status lives in GitHub Issues. Plans describe strategy, not status
 
 ---
 
@@ -84,7 +84,7 @@ For a paper (pre-existing or authored using this workflow) that has received ext
 The editing cycle has four phases:
 
 **Task selection:**
-- Either **Author** names a task directly (constitutes both identification and approval), or **Author Assistant** identifies a candidate from dashboard **To do** (prioritising low-risk/small-scope edits) and presents to **Author** for approval
+- Either **Author** names a task directly (constitutes both identification and approval), or **Author Assistant** identifies a candidate from open issues (prioritising low-risk/small-scope edits) and presents to **Author** for approval
 - On approval: run `select`; proceed to Edit
 - If **Author** redirects: select another candidate, repeat
 - **Author** may also bump a minor issue to structural

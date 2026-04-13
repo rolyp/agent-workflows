@@ -1,6 +1,6 @@
 # Workflow Development Workflow
 
-Follow whenever working on the agent-workflows submodule. See [dashboard](../dashboard.md) for current state and [GitHub Issues](https://github.com/rolyp/agent-workflows/issues) for task tracking.
+Follow whenever working on the agent-workflows submodule. See [GitHub Issues](https://github.com/rolyp/agent-workflows/issues) for task tracking.
 
 ## Roles
 
@@ -60,20 +60,19 @@ The state is a stack. The root frame is the task; steps push frames. Idle = root
 ```
 no task ──begin-task──► idle (root frame, edits locked)
                             │
-               begin-step <desc> <code|test|modify>
+               begin-refactor <desc> <code|test>
+               begin-modify <desc> <rationale...>
                             │
                             ▼
                         step (edits gated by mode)
-                         │      │       │
-              begin-step │   end-step   abort-step
-              (nesting)  │   (tests     (no tests,
-                         ▼    must       rolls back)
-                       step   pass)
-                         │      │
-                         ▼      ▼
-                      (pop to parent frame)
+                            │       │
+                        end-step   abort-step
+                        (tests     (no tests,
+                         must       rolls back)
+                         pass)
                             │
-                   ─────────┘
+                            ▼
+                          idle
                    │
               (at root = idle)
                    │
@@ -126,20 +125,23 @@ Notes:
 
 | Command | Effect | Gate |
 |---------|--------|------|
-| `begin-task <issue#>` | Set root frame; issue → In Progress | No active task |
-| `begin-step <desc> <code\|test\|modify>` | Push step frame | Not in failed state |
-| `end-step` | Pop frame; check off todo with commit link | Tests must pass |
-| `abort-step` | Pop frame without tests; todo left unchecked | — |
-| `request-review` | Enter review | Idle (root frame); tests + CI pass |
-| `respond-review/approve` | Return to idle | In review |
-| `respond-review/feedback [items...]` | Return to idle; add todos | In review |
-| `end-task` | Close issue; return to no task | Phase = approved |
+| `begin-task <issue#>` | Set root frame; issue → In Progress | No active task; no open blockers |
+| `begin-refactor <desc> <code\|test>` | Push refactor step | Idle or approved |
+| `begin-modify <desc> <rationale...>` | Push modify step | Idle or approved |
+| `end-step <commit-message>` | Pop frame; commit; check off todo | Tests must pass |
+| `abort-step [reason]` | Pop frame without tests; todo left unchecked | — |
+| `suspend-task` | Park task; switch to main | Idle; clean tree |
+| `request-review` | Enter review | Idle; tests + CI pass |
+| `submit-review <role> <issue#>` | Link review issue as blocker | In review |
+| `respond-review/approve` | Transition to approved | In review; all reviews submitted |
+| `respond-review/feedback` | Return to idle | In review; all reviews submitted |
+| `end-task` | Close issue; merge to main | Phase = approved |
 
 ### Failure handling
 
 When `end-step` fails (tests don't pass):
 - Step frame stays on stack with `end_step_failed` flag
-- `begin-step` blocked until either tests pass (`end-step` retry) or step is aborted (`abort-step`)
+- New steps blocked until either tests pass (`end-step` retry) or step is aborted (`abort-step`)
 - Prevents masking a behaviour change as a refactoring
 
 ---
@@ -148,25 +150,25 @@ When `end-step` fails (tests don't pass):
 
 ### Task selection
 - **Developer** names an issue directly, or **Dev Assistant** proposes one from open issues
-- On approval: `begin-task <name> <issue-number>`
+- On approval: `begin-task <issue-number>`
 
 ### Working
-- Decompose into steps: `begin-step <description> <code|test|modify>`
-- Steps can nest (decomposition within a step)
-- Adding backwards-compatible behaviour is refactoring (mode `code` or `test`); changing existing behaviour requires mode `modify`
-- Commit after each step; `end-step` runs `test.sh` (mypy + pytest) and pops
+- Decompose into steps: `begin-refactor <desc> <code|test>` or `begin-modify <desc> <rationale...>`
+- Adding backwards-compatible behaviour is refactoring; changing existing behaviour requires modify with rationale
+- `end-step <commit-message>` runs tests, stages, commits, and pops
 
 ### Bug fixes
 - A bug is existing behaviour; capturing it in a test is refactoring
 - Write test asserting **correct** behaviour; decorate with `@unittest.expectedFailure`
 - Tests pass (expected failure counts as OK)
-- Fix with `begin-step <desc> modify`; remove decorator
+- Fix with `begin-modify`; remove decorator
 
 ### Review
 - `request-review` from idle; spawns **User Reviewer** and **Architect Reviewer** as parallel subagents in separate context
-- Both reviewers read the code fresh — no shared development biases
-- Dev Assistant collates findings; `respond-review/approve` or `respond-review/feedback [items...]`
-- Mandatory before `end-task`; `reviewed_sha` must match HEAD
+- Both reviewers create review issues with findings as checklists
+- `submit-review <role> <issue-number>` links review issue as blocker
+- `respond-review/approve` transitions to approved; `respond-review/feedback` returns to idle
+- `end-task` requires approved phase
 
 ### GitHub integration
 - Issue labels track current mode: ⚪ idle, 🟢 refactor/code, 🟢 refactor/test, 🟠 modify, 🟡 review
