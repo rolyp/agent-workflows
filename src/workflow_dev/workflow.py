@@ -103,6 +103,16 @@ class WorkflowDev(Workflow):
                 extra[key] = prev[key]
         super()._write_state(phase, task, **extra)
 
+    def _commit_state(self, message: str) -> None:
+        """Commit state.json. Call before branch switches."""
+        subprocess.run(
+            ["git", "add", "state.json"], capture_output=True, cwd=self.root,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            capture_output=True, cwd=self.root,
+        )
+
     def _label_for_state(self, state: dict) -> str:
         """Derive the appropriate label from a state frame."""
         phase = state.get("phase")
@@ -189,6 +199,13 @@ class WorkflowDev(Workflow):
         phase = self._read_phase()
         if phase is not Phase.IDLE:
             raise ValueError(f"Cannot begin task: current phase is {phase.value}, expected idle")
+        # Check for open blockers
+        repo = self.get_repo()
+        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
+        blockers = self.open_blockers(issue_url)
+        if blockers:
+            blocker_list = ", ".join(f"#{b['number']}" for b in blockers)
+            raise ValueError(f"Issue #{issue_number} is blocked by open issues: {blocker_list}")
         # Create or switch to branch
         branch = f"task/{issue_number}"
         result = subprocess.run(
@@ -203,8 +220,6 @@ class WorkflowDev(Workflow):
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Failed to create branch {branch}: {result.stderr}")
-        repo = self.get_repo()
-        issue_url = f"https://github.com/{repo}/issues/{issue_number}"
         self.set_issue_status(issue_url, "In Progress")
         self._write_state(Phase.REFACTORING, issue_number, issue_url=issue_url)
         # Clear history from previous task
@@ -415,24 +430,17 @@ class WorkflowDev(Workflow):
 
     REVIEW_ROLES = ("user", "architect")
 
-    def submit_review(self, role: str, content: str) -> None:
-        """Submit a review as a comment on the issue."""
+    def submit_review(self, role: str, review_issue_number: str) -> None:
+        """Submit a review by linking a review issue as a blocker."""
         if role not in self.REVIEW_ROLES:
             raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
         self._require_phase(Phase.REVIEW, "submit-review")
-        issue_url = self._issue_url_from_state()
-        if not issue_url:
+        task_url = self._issue_url_from_state()
+        if not task_url:
             raise ValueError("No issue URL in state")
         repo = self.get_repo()
-        number = self._get_issue_number(issue_url)
-        comment = f"## {role.capitalize()} Review\n\n{content}"
-        env = self._gh_env()
-        result = subprocess.run(
-            ["gh", "issue", "comment", number, "--repo", repo, "--body", comment],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to submit review comment: {result.stderr}")
+        review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
+        self.add_blocker(task_url, review_url)
         # Record in state
         sf = self._read_state_file()
         reviews = sf["stack"][-1].get("reviews_submitted", [])
@@ -463,6 +471,7 @@ class WorkflowDev(Workflow):
     def approve(self) -> None:
         """Approve review; transition to approved. Requires both reviews submitted."""
         self._complete_review("respond-review/approve", Phase.APPROVED)
+        self._commit_state("state: approved")
 
     def feedback(self, items: list[str] | None = None) -> None:
         """Review feedback; return to idle. Requires reviews to have been submitted."""
@@ -491,10 +500,12 @@ class WorkflowDev(Workflow):
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
         if branch and branch != "main":
-            subprocess.run(
+            result = subprocess.run(
                 ["git", "checkout", "main"],
                 capture_output=True, text=True, cwd=self.root,
             )
+            if result.returncode != 0:
+                raise RuntimeError(f"Failed to checkout main: {result.stderr}")
             result = subprocess.run(
                 ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
                 capture_output=True, text=True, cwd=self.root,
@@ -505,6 +516,13 @@ class WorkflowDev(Workflow):
                     capture_output=True, cwd=self.root,
                 )
                 raise RuntimeError(f"Merge failed: {result.stderr}")
+            # Assert we're on main
+            current = subprocess.run(
+                ["git", "branch", "--show-current"],
+                capture_output=True, text=True, cwd=self.root,
+            ).stdout.strip()
+            if current != "main":
+                raise RuntimeError(f"Expected to be on main after merge, but on {current}")
             # Push main if remote exists
             has_remote = subprocess.run(
                 ["git", "remote", "get-url", "origin"],
@@ -527,7 +545,7 @@ class WorkflowDev(Workflow):
         self._write_state(Phase.IDLE, issue_url=None)
 
     def suspend_task(self) -> None:
-        """Park the current task. Switches to main, sets issue to Planned."""
+        """Park the current task. Switches to main, sets issue to Paused."""
         self._require_task_idle("suspend-task")
         # Require clean working tree
         status = subprocess.run(
@@ -541,13 +559,16 @@ class WorkflowDev(Workflow):
             )
         issue_url = self._issue_url_from_state()
         if issue_url:
-            self.set_issue_status(issue_url, "Planned")
+            self.set_issue_status(issue_url, "Paused")
             self.clear_issue_labels(issue_url)
         self._write_state(Phase.IDLE)
-        subprocess.run(
+        self._commit_state("state: idle (task suspended)")
+        result = subprocess.run(
             ["git", "switch", "main"],
             capture_output=True, text=True, cwd=self.root,
         )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to switch to main: {result.stderr}")
 
     # --- Protocol suspension ---
 
@@ -570,9 +591,10 @@ class WorkflowDev(Workflow):
 
     def _approve_task(self) -> None:
         """Set current task to approved. Developer-only — not exposed via CLI."""
-        self._require_task_idle("approve-task")
+        self._require_phase(Phase.REFACTORING, "approve-task")
         state = self.read_state()
         self._write_state(Phase.APPROVED, state.get("task"))
+        self._commit_state("state: approved")
 
     # --- Hook gates ---
 
@@ -781,10 +803,10 @@ def main() -> None:
     elif command == CMD_SUBMIT_REVIEW:
         args = sys.argv[2:]
         if len(args) < 2:
-            print(f"Usage: workflow.py {CMD_SUBMIT_REVIEW} <user|architect> <content>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_SUBMIT_REVIEW} <user|architect> <review-issue-number>", file=sys.stderr)
             sys.exit(1)
         wd.submit_review(args[0], args[1])
-        print(f"Review submitted: {args[0]}")
+        print(f"Review submitted: {args[0]} (#{args[1]} added as blocker)")
     elif command == CMD_CREATE_ISSUE:
         args = sys.argv[2:]
         if len(args) < 2:
