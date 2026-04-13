@@ -189,6 +189,37 @@ class StateTransitionTest(TestFixture):
         self.assertEqual(state["phase"], "refactoring")
         self.assertEqual(state["task"], "1")
 
+    @patch.object(WorkflowDev, "_write_issue_body")
+    @patch.object(WorkflowDev, "_read_issue_body")
+    def test_feedback_inserts_todos_above_steps(self, mock_read, mock_write):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.request_review()
+        self._submit_mock_reviews(wd)
+        mock_read.return_value = "Some text\n\n## Steps\n\n- [x] step one"
+        wd.feedback(items=["Fix this", "Fix that"])
+        mock_write.assert_called_once()
+        body = mock_write.call_args[0][1]
+        self.assertIn("- [ ] Fix this", body)
+        self.assertIn("- [ ] Fix that", body)
+        steps_idx = body.index("## Steps")
+        todos_idx = body.index("- [ ] Fix this")
+        self.assertLess(todos_idx, steps_idx)
+
+    @patch.object(WorkflowDev, "_write_issue_body")
+    @patch.object(WorkflowDev, "_read_issue_body")
+    def test_feedback_without_items_skips_body_edit(self, mock_read, mock_write):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.request_review()
+        self._submit_mock_reviews(wd)
+        wd.feedback()
+        mock_write.assert_not_called()
+
     def test_feedback_without_reviews_fails(self):
         wd = self._make_wd()
         wd.begin_task("1")
