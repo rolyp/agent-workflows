@@ -16,10 +16,10 @@ from enum import Enum
 from pathlib import Path
 
 # Ensure parent directory is on path when run as script
-if __name__ == "__main__" or "base" not in sys.modules:
+if __name__ == "__main__" or "workflow" not in sys.modules:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from base import Workflow, ValidationError
+from workflow import Workflow, ValidationError
 
 
 
@@ -606,6 +606,18 @@ class PaperAuthoring(Workflow):
                 f"Cannot overwrite existing file {file_path} with Write tool. "
                 f"Use Edit tool for modifications to existing files."
             )
+        return True, ""
+
+    def check_bash(self, command: str) -> tuple[bool, str]:
+        """Gate shell commands: block writes to protected files via shell."""
+        cmd = command.strip()
+        # Detect common shell write patterns targeting protected files
+        for protected in PROTECTED_FILES:
+            if protected in cmd:
+                return False, (
+                    f"Cannot modify {protected} via shell. "
+                    "Use PaperAuthoring commands."
+                )
         return True, ""
 
     # --- Helpers ---

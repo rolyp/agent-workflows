@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from workflow_dev.workflow import WorkflowDev, Phase, StepMode, _is_test_file
-from base import Workflow
+from workflow import Workflow
 
 
 class TestFixture(unittest.TestCase):

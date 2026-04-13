@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from base import Workflow
+from workflow import Workflow
 from paper_authoring.workflow import PaperAuthoring
 
 
