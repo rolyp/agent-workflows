@@ -112,12 +112,14 @@ Observed patterns and how they map to step modes. These will evolve.
 | Pattern | What changes | Step mode | Constraint |
 |---------|-------------|-----------|------------|
 | **Additive refactoring** | New code + new tests | refactor/code then refactor/test | Nothing existing changes; additions are safe independently |
+| **Subtractive refactoring** | Delete unused tests + delete unused code | refactor/test then refactor/code | Deleted tests must already have equivalents covering the new implementation; deleted code must have no remaining callers |
 | **Coverage improvement** | New tests only | refactor/test | New tests must pass against existing code — they document what already works |
 | **Behaviour removal** | Delete code + delete tests | modify | Removed tests must only test removed code |
 | **Behaviour modification** | Change code + change existing tests | modify | Rationale links each test change to the code change |
 
 Notes:
 - Additive refactoring currently requires two steps (code then test) due to the code/test firewall. Both steps are individually safe.
+- Subtractive refactoring is the exact reverse: test-first (migrate/remove test references), then code (delete unused code). Used when completing a migration to a new implementation.
 - Behaviour removal is not backwards-compatible, so requires modify — even though nothing is being *changed*, only eliminated.
 - Purely adding tests before a change is a valuable preparatory step: it establishes witnesses that validate subsequent refactorings.
 
