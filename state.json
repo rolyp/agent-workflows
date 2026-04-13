@@ -8,9 +8,15 @@
     {
       "phase": "refactoring",
       "task": "50",
-      "step": "[refactor/code] Add open_blockers method to query blocked-by dependencies",
+      "step": "[refactor/code] Add add_blocker method to create blocked-by dependencies",
       "mode": "code"
     }
   ],
-  "history": []
+  "history": [
+    {
+      "step": "[refactor/code] Add open_blockers method to query blocked-by dependencies",
+      "status": "completed",
+      "commit": "dbdd7a5315a6d319373698723c6320f457ea5d49"
+    }
+  ]
 }

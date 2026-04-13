@@ -394,6 +394,20 @@ class Workflow(ABC):
             raise RuntimeError(f"Failed to reopen issue: {result.stderr}")
         self.set_issue_status(issue_url, "In Progress")
 
+    def add_blocker(self, blocked_url: str, blocker_url: str) -> None:
+        """Mark blocker_url as blocking blocked_url (via blocked-by dependency)."""
+        owner, repo_name, number = self._parse_issue_url(blocked_url)
+        blocker_id = self._get_issue_id(blocker_url)
+        env = self._gh_env()
+        result = subprocess.run(
+            ["gh", "api", "--method", "POST",
+             f"repos/{owner}/{repo_name}/issues/{number}/dependencies/blocked_by",
+             "-F", f"blocked_by_issue_id={blocker_id}"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to add blocker: {result.stderr}")
+
     def open_blockers(self, issue_url: str) -> list[dict]:
         """Return open issues that block this issue (via blocked-by dependency)."""
         owner, repo_name, number = self._parse_issue_url(issue_url)
@@ -494,6 +508,19 @@ class Workflow(ABC):
         """Extract issue number from URL."""
         _, _, number = self._parse_issue_url(issue_url)
         return number
+
+    def _get_issue_id(self, issue_url: str) -> int:
+        """Get the numeric issue ID (not number) from a URL."""
+        owner, repo_name, number = self._parse_issue_url(issue_url)
+        env = self._gh_env()
+        result = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo_name}/issues/{number}",
+             "--jq", ".id"],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to get issue ID: {result.stderr}")
+        return int(result.stdout.strip())
 
     def _read_issue_body(self, issue_url: str) -> str:
         """Read an issue's body text."""
