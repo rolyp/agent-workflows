@@ -8,7 +8,7 @@
     {
       "phase": "refactoring",
       "task": "76",
-      "step": "[refactor/code] Commit state.json in _approve_task and check return codes in end_task",
+      "step": "[refactor/code] Targeted state.json commits before branch switches",
       "mode": "code"
     }
   ],

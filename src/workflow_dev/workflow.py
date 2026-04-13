@@ -96,17 +96,20 @@ class WorkflowDev(Workflow):
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
-        """Replace top frame, carrying forward issue_url. Commits state.json."""
+        """Replace top frame, carrying forward issue_url."""
         prev = self.read_state()
         for key in self._CARRY_FORWARD:
             if key not in extra and key in prev:
                 extra[key] = prev[key]
         super()._write_state(phase, task, **extra)
+
+    def _commit_state(self, message: str) -> None:
+        """Commit state.json. Call before branch switches."""
         subprocess.run(
             ["git", "add", "state.json"], capture_output=True, cwd=self.root,
         )
         subprocess.run(
-            ["git", "commit", "-m", f"state: {phase.value}"],
+            ["git", "commit", "-m", message],
             capture_output=True, cwd=self.root,
         )
 
@@ -468,6 +471,7 @@ class WorkflowDev(Workflow):
     def approve(self) -> None:
         """Approve review; transition to approved. Requires both reviews submitted."""
         self._complete_review("respond-review/approve", Phase.APPROVED)
+        self._commit_state("state: approved")
 
     def feedback(self, items: list[str] | None = None) -> None:
         """Review feedback; return to idle. Requires reviews to have been submitted."""
@@ -558,10 +562,13 @@ class WorkflowDev(Workflow):
             self.set_issue_status(issue_url, "Paused")
             self.clear_issue_labels(issue_url)
         self._write_state(Phase.IDLE)
-        subprocess.run(
+        self._commit_state("state: idle (task suspended)")
+        result = subprocess.run(
             ["git", "switch", "main"],
             capture_output=True, text=True, cwd=self.root,
         )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to switch to main: {result.stderr}")
 
     # --- Protocol suspension ---
 
@@ -587,6 +594,7 @@ class WorkflowDev(Workflow):
         self._require_phase(Phase.REFACTORING, "approve-task")
         state = self.read_state()
         self._write_state(Phase.APPROVED, state.get("task"))
+        self._commit_state("state: approved")
 
     # --- Hook gates ---
 
