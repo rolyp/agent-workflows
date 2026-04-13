@@ -46,7 +46,7 @@ class TestFixture(unittest.TestCase):
         test_sh.chmod(0o755)
         # Init git repo (with user config for CI environments)
         import subprocess
-        subprocess.run(["git", "init"], capture_output=True, cwd=self.test_dir)
+        subprocess.run(["git", "init", "-b", "main"], capture_output=True, cwd=self.test_dir)
         subprocess.run(["git", "config", "user.email", "test@test.com"],
                        capture_output=True, cwd=self.test_dir)
         subprocess.run(["git", "config", "user.name", "Test"],
@@ -482,7 +482,7 @@ class TodoMarkingTest(unittest.TestCase):
         (test_dir / "test" / "test.sh").write_text("#!/bin/bash\nexit 0\n")
         (test_dir / "test" / "test.sh").chmod(0o755)
         import subprocess
-        subprocess.run(["git", "init"], capture_output=True, cwd=test_dir)
+        subprocess.run(["git", "init", "-b", "main"], capture_output=True, cwd=test_dir)
         subprocess.run(["git", "commit", "--allow-empty", "-m", "init"],
                        capture_output=True, cwd=test_dir)
         wd = WorkflowDev(test_dir)
