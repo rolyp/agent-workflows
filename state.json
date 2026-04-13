@@ -2,42 +2,15 @@
   "stack": [
     {
       "phase": "refactoring",
-      "task": "50",
-      "issue_url": "https://github.com/rolyp/agent-workflows/issues/50"
+      "task": "76",
+      "issue_url": "https://github.com/rolyp/agent-workflows/issues/76"
     },
     {
       "phase": "refactoring",
-      "task": "50",
-      "step": "[refactor/code] Change suspend-task to set Paused instead of Planned",
+      "task": "76",
+      "step": "[refactor/code] Tighten _approve_task to require REFACTORING",
       "mode": "code"
     }
   ],
-  "history": [
-    {
-      "step": "[refactor/code] Add open_blockers method to query blocked-by dependencies",
-      "status": "completed",
-      "commit": "dbdd7a5315a6d319373698723c6320f457ea5d49"
-    },
-    {
-      "step": "[refactor/code] Add add_blocker method to create blocked-by dependencies",
-      "status": "completed",
-      "commit": "55c933aacd87b8e36b0496e8829f9e6d9447458a"
-    },
-    {
-      "step": "[modify] Gate begin-task on open blockers",
-      "status": "completed",
-      "commit": "4dd10e2ba733ab3911b3339317dd28927914960b",
-      "rationale": [
-        "test_begin_task_enters_idle: begin_task succeeds \u2192 blocked if open blockers exist"
-      ]
-    },
-    {
-      "step": "[modify] Change submit-review to accept issue number and create blocked-by",
-      "status": "completed",
-      "commit": "a4ffc85234a5dfaf2a177e11f6845fe9e8b343ab",
-      "rationale": [
-        "test_*: submit_review(role, content) \u2192 submit_review(role, issue_number)"
-      ]
-    }
-  ]
+  "history": []
 }

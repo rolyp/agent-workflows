@@ -568,7 +568,7 @@ class WorkflowDev(Workflow):
 
     def _approve_task(self) -> None:
         """Set current task to approved. Developer-only — not exposed via CLI."""
-        self._require_task_idle("approve-task")
+        self._require_phase(Phase.REFACTORING, "approve-task")
         state = self.read_state()
         self._write_state(Phase.APPROVED, state.get("task"))
 
