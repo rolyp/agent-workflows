@@ -8,10 +8,10 @@
     {
       "phase": "modifying",
       "task": "50",
-      "step": "[modify] Gate begin-task on open blockers",
+      "step": "[modify] Change submit-review to accept issue number and create blocked-by",
       "mode": "modify",
       "rationale": [
-        "test_begin_task_enters_idle: begin_task succeeds \u2192 blocked if open blockers exist"
+        "test_*: submit_review(role, content) \u2192 submit_review(role, issue_number)"
       ]
     }
   ],
@@ -25,6 +25,14 @@
       "step": "[refactor/code] Add add_blocker method to create blocked-by dependencies",
       "status": "completed",
       "commit": "55c933aacd87b8e36b0496e8829f9e6d9447458a"
+    },
+    {
+      "step": "[modify] Gate begin-task on open blockers",
+      "status": "completed",
+      "commit": "4dd10e2ba733ab3911b3339317dd28927914960b",
+      "rationale": [
+        "test_begin_task_enters_idle: begin_task succeeds \u2192 blocked if open blockers exist"
+      ]
     }
   ]
 }

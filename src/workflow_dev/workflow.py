@@ -420,24 +420,17 @@ class WorkflowDev(Workflow):
 
     REVIEW_ROLES = ("user", "architect")
 
-    def submit_review(self, role: str, content: str) -> None:
-        """Submit a review as a comment on the issue."""
+    def submit_review(self, role: str, review_issue_number: str) -> None:
+        """Submit a review by linking a review issue as a blocker."""
         if role not in self.REVIEW_ROLES:
             raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
         self._require_phase(Phase.REVIEW, "submit-review")
-        issue_url = self._issue_url_from_state()
-        if not issue_url:
+        task_url = self._issue_url_from_state()
+        if not task_url:
             raise ValueError("No issue URL in state")
         repo = self.get_repo()
-        number = self._get_issue_number(issue_url)
-        comment = f"## {role.capitalize()} Review\n\n{content}"
-        env = self._gh_env()
-        result = subprocess.run(
-            ["gh", "issue", "comment", number, "--repo", repo, "--body", comment],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to submit review comment: {result.stderr}")
+        review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
+        self.add_blocker(task_url, review_url)
         # Record in state
         sf = self._read_state_file()
         reviews = sf["stack"][-1].get("reviews_submitted", [])
@@ -786,10 +779,10 @@ def main() -> None:
     elif command == CMD_SUBMIT_REVIEW:
         args = sys.argv[2:]
         if len(args) < 2:
-            print(f"Usage: workflow.py {CMD_SUBMIT_REVIEW} <user|architect> <content>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_SUBMIT_REVIEW} <user|architect> <review-issue-number>", file=sys.stderr)
             sys.exit(1)
         wd.submit_review(args[0], args[1])
-        print(f"Review submitted: {args[0]}")
+        print(f"Review submitted: {args[0]} (#{args[1]} added as blocker)")
     elif command == CMD_CREATE_ISSUE:
         args = sys.argv[2:]
         if len(args) < 2:

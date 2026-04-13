@@ -26,6 +26,7 @@ class TestFixture(unittest.TestCase):
             patch.object(WorkflowDev, "clear_issue_labels"),
             patch.object(WorkflowDev, "close_issue"),
             patch.object(WorkflowDev, "open_blockers", return_value=[]),
+            patch.object(WorkflowDev, "add_blocker"),
             patch.object(WorkflowDev, "_render_issue_todos"),
         ]
         for p in self._patches:
