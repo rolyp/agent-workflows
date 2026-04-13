@@ -1,0 +1,16 @@
+{
+  "stack": [
+    {
+      "phase": "refactoring",
+      "task": "73",
+      "issue_url": "https://github.com/rolyp/agent-workflows/issues/73"
+    },
+    {
+      "phase": "refactoring",
+      "task": "73",
+      "step": "[refactor/code] Clean up .gitignore",
+      "mode": "code"
+    }
+  ],
+  "history": []
+}
