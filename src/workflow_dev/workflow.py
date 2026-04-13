@@ -306,7 +306,9 @@ class WorkflowDev(Workflow):
             sf["stack"][-1]["end_step_failed"] = True
             self._save_stack(sf["stack"], history=sf["history"])
             raise
-        # Stage and commit
+        # Stage and commit. git add -A is safe here: sensitive files (e.g.
+        # settings.local.json) must be covered by .gitignore, which is a
+        # pre-condition of using the workflow — not something we can enforce here.
         subprocess.run(
             ["git", "add", "-A"], capture_output=True, cwd=self.root,
         )
