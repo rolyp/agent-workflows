@@ -733,9 +733,10 @@ def main() -> None:
         print("Plan approved; returning to edit phase")
     elif command == CMD_ADD_SUBTASK:
         if len(sys.argv) < 4:
-            print(f"Usage: workflow.py {CMD_ADD_SUBTASK} <subtask-id> <description>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_ADD_SUBTASK} <subtask-id> <description> [issue-number]", file=sys.stderr)
             sys.exit(1)
-        workflow.add_subtask(sys.argv[2], sys.argv[3])
+        issue_num = sys.argv[4] if len(sys.argv) > 4 else None
+        workflow.add_subtask(sys.argv[2], sys.argv[3], issue_number=issue_num)
         print(f"Added subtask: {sys.argv[2]}")
     elif command == CMD_BEGIN_SUBTASK:
         if len(sys.argv) < 4:
