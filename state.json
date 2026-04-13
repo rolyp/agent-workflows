@@ -6,13 +6,10 @@
       "issue_url": "https://github.com/rolyp/agent-workflows/issues/50"
     },
     {
-      "phase": "modifying",
+      "phase": "refactoring",
       "task": "50",
-      "step": "[modify] Change submit-review to accept issue number and create blocked-by",
-      "mode": "modify",
-      "rationale": [
-        "test_*: submit_review(role, content) \u2192 submit_review(role, issue_number)"
-      ]
+      "step": "[refactor/code] Change suspend-task to set Paused instead of Planned",
+      "mode": "code"
     }
   ],
   "history": [
@@ -32,6 +29,14 @@
       "commit": "4dd10e2ba733ab3911b3339317dd28927914960b",
       "rationale": [
         "test_begin_task_enters_idle: begin_task succeeds \u2192 blocked if open blockers exist"
+      ]
+    },
+    {
+      "step": "[modify] Change submit-review to accept issue number and create blocked-by",
+      "status": "completed",
+      "commit": "a4ffc85234a5dfaf2a177e11f6845fe9e8b343ab",
+      "rationale": [
+        "test_*: submit_review(role, content) \u2192 submit_review(role, issue_number)"
       ]
     }
   ]

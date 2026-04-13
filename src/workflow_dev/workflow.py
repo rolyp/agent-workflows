@@ -525,7 +525,7 @@ class WorkflowDev(Workflow):
         self._write_state(Phase.IDLE, issue_url=None)
 
     def suspend_task(self) -> None:
-        """Park the current task. Switches to main, sets issue to Planned."""
+        """Park the current task. Switches to main, sets issue to Paused."""
         self._require_task_idle("suspend-task")
         # Require clean working tree
         status = subprocess.run(
@@ -539,7 +539,7 @@ class WorkflowDev(Workflow):
             )
         issue_url = self._issue_url_from_state()
         if issue_url:
-            self.set_issue_status(issue_url, "Planned")
+            self.set_issue_status(issue_url, "Paused")
             self.clear_issue_labels(issue_url)
         self._write_state(Phase.IDLE)
         subprocess.run(
