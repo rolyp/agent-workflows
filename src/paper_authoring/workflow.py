@@ -257,12 +257,8 @@ class PaperAuthoring(Workflow):
         self._write_state(Phase.EDIT, issue_number, regions=regions,
                           description=description, issue_url=issue_url)
         # Update GitHub
-        if issue_url:
-            try:
-                self.set_issue_status(issue_url, "In Progress")
-                self.set_issue_label(issue_url, self.LABEL_EDIT)
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+        self.set_issue_status(issue_url, "In Progress")
+        self.set_issue_label(issue_url, self.LABEL_EDIT)
 
     def begin_ad_hoc(self, regions: list[tuple[str, str]]) -> None:
         """Start an ad hoc edit; place review bars (skips Edit, goes to review)."""
@@ -326,10 +322,7 @@ class PaperAuthoring(Workflow):
             self._pop_state(validate=False)
             # Close sub-issue if linked
             if subtask_url:
-                try:
-                    self.close_issue(subtask_url)
-                except Exception:
-                    pass
+                self.close_issue(subtask_url)
             # Mark subtask as completed in parent's list
             parent_stack = self._read_stack()
             for st in parent_stack[-1].get("subtasks", []):
@@ -348,10 +341,7 @@ class PaperAuthoring(Workflow):
             state = self.read_state()
             issue_url = state.get("issue_url")
             if issue_url:
-                try:
-                    self.close_issue(issue_url)
-                except Exception:
-                    pass
+                self.close_issue(issue_url)
             self._write_state(Phase.IDLE)
 
     # --- Subtasks ---
@@ -370,21 +360,15 @@ class PaperAuthoring(Workflow):
         subtask_entry: dict[str, object] = {"id": subtask_id, "description": description}
         if issue_number:
             # Link existing issue
-            try:
-                repo = self.get_repo()
-                sub_url = f"https://github.com/{repo}/issues/{issue_number}"
-                if parent_url:
-                    self.link_sub_issue(parent_url, sub_url)
-                subtask_entry["issue_url"] = sub_url
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            repo = self.get_repo()
+            sub_url = f"https://github.com/{repo}/issues/{issue_number}"
+            if parent_url:
+                self.link_sub_issue(parent_url, sub_url)
+            subtask_entry["issue_url"] = sub_url
         elif parent_url:
             # Create new sub-issue
-            try:
-                sub_url = self.create_sub_issue(parent_url, description)
-                subtask_entry["issue_url"] = sub_url
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            sub_url = self.create_sub_issue(parent_url, description)
+            subtask_entry["issue_url"] = sub_url
         subtasks = list(frame.get("subtasks", []))
         subtasks.append(subtask_entry)
         frame["subtasks"] = subtasks
@@ -411,11 +395,8 @@ class PaperAuthoring(Workflow):
                          issue_url=subtask_url)
         # Set sub-issue to In Progress
         if subtask_url:
-            try:
-                self.set_issue_status(subtask_url, "In Progress")
-                self.set_issue_label(subtask_url, self.LABEL_EDIT)
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            self.set_issue_status(subtask_url, "In Progress")
+            self.set_issue_label(subtask_url, self.LABEL_EDIT)
 
 
     # --- Bar operations (require active task) ---
@@ -451,10 +432,7 @@ class PaperAuthoring(Workflow):
         self._write_state(Phase.AUTHOR_REVIEW, task)
         issue_url = state.get("issue_url")
         if issue_url:
-            try:
-                self.set_issue_label(issue_url, self.LABEL_REVIEW)
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            self.set_issue_label(issue_url, self.LABEL_REVIEW)
 
     def review_to_edit(self) -> None:
         """Swap all review bars to edit bars; transition to edit phase."""
@@ -469,10 +447,7 @@ class PaperAuthoring(Workflow):
         self._write_state(Phase.EDIT, task)
         issue_url = state.get("issue_url")
         if issue_url:
-            try:
-                self.set_issue_label(issue_url, self.LABEL_EDIT)
-            except Exception as e:
-                print(f"GitHub operation failed: {e}", file=sys.stderr)
+            self.set_issue_label(issue_url, self.LABEL_EDIT)
 
     def _build(self) -> None:
         """Run the build script if it exists."""
