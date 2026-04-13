@@ -470,7 +470,7 @@ class PaperAuthoring(Workflow):
 
     def _build(self) -> None:
         """Run the build script if it exists."""
-        build_script = self.root / "workflow" / "agent-workflows" / "paper_authoring" / "build.sh"
+        build_script = self.root / "workflow" / "agent-workflows" / "src" / "paper_authoring" / "build.sh"
         if build_script.exists():
             result = subprocess.run(
                 ["bash", str(build_script)],
