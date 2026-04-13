@@ -172,6 +172,11 @@ When `end-step` fails (tests don't pass):
 - `respond-review/approve` transitions to approved; `respond-review/feedback` returns to idle
 - `end-task` requires approved phase
 
+### Review-finding tasks
+- Tasks that work through review findings (e.g. address a user review issue) exit via `approve-task` — no nested review needed
+- Do not call `request-review`; use `approve-task` (developer approval) then `end-task`
+- `approve-task` accepts both refactoring and review phase for this reason
+
 ### GitHub integration
 - Issue labels track current mode: ⚪ idle, 🟢 refactor/code, 🟢 refactor/test, 🟠 modify, 🟡 review
 - Issue body todos track steps: 🟢/🟠 emoji for active, checked with commit link when complete
