@@ -81,6 +81,8 @@ def _is_test_file(path: str) -> bool:
 
 class WorkflowDev(Workflow):
     def __init__(self, project_root: Path):
+        if not project_root.is_dir():
+            raise FileNotFoundError(f"project_root is not a directory: {project_root}")
         self.root = project_root
         self.state_path = project_root / "state.json"
         self._init_state(Phase.IDLE)
@@ -99,9 +101,6 @@ class WorkflowDev(Workflow):
         LABEL_IDLE, LABEL_REFACTOR_TEST, LABEL_REFACTOR_CODE,
         LABEL_MODIFY, LABEL_REVIEW,
     )
-
-    # Fields carried forward from previous frame unless overridden
-    _CARRY_FORWARD = ("issue_url",)
 
     # Bash whitelist: commands always permitted in protocol mode
     _BASH_READ_ONLY = (
@@ -139,15 +138,6 @@ class WorkflowDev(Workflow):
             if re.match(pattern, command):
                 return True
         return False
-
-    def _write_state(self, phase: Enum, task: str | None = None,
-                     **extra: object) -> None:
-        """Replace top frame, carrying forward issue_url."""
-        prev = self.read_state()
-        for key in self._CARRY_FORWARD:
-            if key not in extra and key in prev:
-                extra[key] = prev[key]
-        super()._write_state(phase, task, **extra)
 
     def _commit_state(self, message: str) -> None:
         """Commit state.json. Call before branch switches."""
@@ -404,15 +394,9 @@ class WorkflowDev(Workflow):
         self._append_history(entry)
         self._render_issue_todos()
 
-    def _render_issue_todos(self) -> None:
-        """Re-render the issue body's todo section from history + stack."""
-        issue_url = self._issue_url_from_state()
-        if not issue_url:
-            return
-        sf = self._read_state_file()
-        repo = self.get_repo()
+    def _render_steps_markdown(self, sf: dict, repo: str) -> str:
+        """Render the Steps section as markdown from the state file + repo."""
         lines = []
-        # Render history
         for entry in sf["history"]:
             step = entry["step"]
             status = entry["status"]
@@ -430,26 +414,28 @@ class WorkflowDev(Workflow):
                     lines.append(f'- [x] \u26d4 {step} ([aborted](## "{reason}"))')
                 else:
                     lines.append(f"- [x] \u26d4 {step} (aborted)")
-        # Render active step from stack (if any)
         for frame in sf["stack"][1:]:  # skip root frame
             step = frame.get("step")
             mode = frame.get("mode", "")
             if step:
                 emoji = self.MODE_EMOJI.get(mode, "\u26aa")
                 lines.append(f"- [ ] {emoji} {step}")
-        # Read existing body, find the steps section, replace it
-        body = self._read_issue_body(issue_url)
+        return "\n".join(lines)
+
+    def _render_issue_todos(self) -> None:
+        """Re-render the issue body's Steps section from history + stack."""
+        issue_url = self._issue_url_from_state()
+        if not issue_url:
+            return
+        steps_md = self._render_steps_markdown(self._read_state_file(), self.get_repo())
         section_start = "## Steps"
         section_end = "---"
-        rendered_section = f"{section_start}\n\n" + "\n".join(lines) + f"\n\n{section_end}"
+        rendered_section = f"{section_start}\n\n{steps_md}\n\n{section_end}"
+        body = self._read_issue_body(issue_url)
         if section_start in body:
-            # Replace existing section (from heading to next ---)
             start_idx = body.index(section_start)
             end_idx = body.find(section_end, start_idx + len(section_start))
-            if end_idx != -1:
-                end_idx += len(section_end)
-            else:
-                end_idx = len(body)
+            end_idx = end_idx + len(section_end) if end_idx != -1 else len(body)
             body = body[:start_idx] + rendered_section + body[end_idx:]
         else:
             body = body.rstrip() + f"\n\n{rendered_section}\n"
@@ -476,8 +462,7 @@ class WorkflowDev(Workflow):
             if result.returncode != 0:
                 raise RuntimeError(f"Push failed: {result.stderr}")
             self._check_ci()
-        state = self.read_state()
-        self._write_state(Phase.REVIEW, state.get("task"))
+        self._update_state(phase=Phase.REVIEW)
         self._set_label(self.LABEL_REVIEW)
         return {role: self._create_review_issue(role) for role in self.REVIEW_ROLES}
 
@@ -538,69 +523,70 @@ class WorkflowDev(Workflow):
                 status[role] = ReviewStatus.IN_PROGRESS
         # Transition only when every reviewer has given a verdict.
         if all(s is not ReviewStatus.IN_PROGRESS for s in status.values()):
-            state = self.read_state()
             if all(s is ReviewStatus.DONE for s in status.values()):
-                self._write_state(Phase.APPROVED, state.get("task"))
+                self._update_state(phase=Phase.APPROVED)
                 self._set_label(self.LABEL_IDLE)
                 self._commit_state("state: approved (auto from review)")
             else:
-                self._write_state(Phase.REFACTORING, state.get("task"))
+                self._update_state(phase=Phase.REFACTORING)
                 self._set_label(self.LABEL_IDLE)
                 self._commit_state("state: refactoring (auto from review)")
 
     def end_task(self) -> None:
         """Complete the current task. Requires approved review."""
         self._require_phase(Phase.APPROVED, "end-task")
+        self._merge_to_main()
+        issue_url = self._issue_url_from_state()
+        if issue_url:
+            self.close_issue(issue_url)
+        self._update_state(phase=Phase.IDLE, issue_url=None)
 
-        # Merge branch to main (skip if already on main or no remote)
+    def _merge_to_main(self) -> None:
+        """Merge the current task branch to main, push, and delete the branch.
+
+        No-op if already on main or on a detached HEAD.
+        """
         branch = subprocess.run(
             ["git", "branch", "--show-current"],
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
-        if branch and branch != "main":
-            result = subprocess.run(
-                ["git", "checkout", "main"],
-                capture_output=True, text=True, cwd=self.root,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(f"Failed to checkout main: {result.stderr}")
-            result = subprocess.run(
-                ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
-                capture_output=True, text=True, cwd=self.root,
-            )
-            if result.returncode != 0:
-                subprocess.run(
-                    ["git", "checkout", branch],
-                    capture_output=True, cwd=self.root,
-                )
-                raise RuntimeError(f"Merge failed: {result.stderr}")
-            # Assert we're on main
-            current = subprocess.run(
-                ["git", "branch", "--show-current"],
-                capture_output=True, text=True, cwd=self.root,
-            ).stdout.strip()
-            if current != "main":
-                raise RuntimeError(f"Expected to be on main after merge, but on {current}")
-            # Push main if remote exists
-            has_remote = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                capture_output=True, text=True, cwd=self.root,
-            ).returncode == 0
-            if has_remote:
-                subprocess.run(
-                    ["git", "push", "origin", "main"],
-                    capture_output=True, text=True, cwd=self.root,
-                )
-            # Delete branch
+        if not branch or branch == "main":
+            return
+        result = subprocess.run(
+            ["git", "checkout", "main"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to checkout main: {result.stderr}")
+        result = subprocess.run(
+            ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if result.returncode != 0:
             subprocess.run(
-                ["git", "branch", "-d", branch],
+                ["git", "checkout", branch],
                 capture_output=True, cwd=self.root,
             )
-
-        issue_url = self._issue_url_from_state()
-        if issue_url:
-            self.close_issue(issue_url)
-        self._write_state(Phase.IDLE, issue_url=None)
+            raise RuntimeError(f"Merge failed: {result.stderr}")
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True, text=True, cwd=self.root,
+        ).stdout.strip()
+        if current != "main":
+            raise RuntimeError(f"Expected to be on main after merge, but on {current}")
+        has_remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=self.root,
+        ).returncode == 0
+        if has_remote:
+            subprocess.run(
+                ["git", "push", "origin", "main"],
+                capture_output=True, text=True, cwd=self.root,
+            )
+        subprocess.run(
+            ["git", "branch", "-d", branch],
+            capture_output=True, cwd=self.root,
+        )
 
     def suspend_task(self) -> None:
         """Park the current task. Switches to main, sets issue to Paused."""
@@ -619,7 +605,7 @@ class WorkflowDev(Workflow):
         if issue_url:
             self.set_issue_status(issue_url, "Paused")
             self.clear_issue_labels(issue_url)
-        self._write_state(Phase.IDLE)
+        self._update_state(phase=Phase.IDLE)
         self._commit_state("state: idle (task suspended)")
         result = subprocess.run(
             ["git", "switch", "main"],
@@ -655,8 +641,7 @@ class WorkflowDev(Workflow):
                 f"approve-task requires an active task in refactoring or review phase "
                 f"(current: {phase.value})"
             )
-        state = self.read_state()
-        self._write_state(Phase.APPROVED, state.get("task"))
+        self._update_state(phase=Phase.APPROVED)
         self._commit_state("state: approved")
 
     # --- Hook gates ---
@@ -767,18 +752,18 @@ class WorkflowDev(Workflow):
 
     def _check_ci(self) -> None:
         """Wait for CI on the current branch to complete. Blocks until done."""
-        env = self._gh_env()
-
-        # Get current branch
         branch = subprocess.run(
             ["git", "branch", "--show-current"],
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
         if not branch:
             return  # detached HEAD, skip CI check
+        run_id = self._find_ci_run_id(branch)
+        self._wait_for_ci_run(run_id)
 
-        # Wait for run to appear (retry up to 30s)
-        run_id = None
+    def _find_ci_run_id(self, branch: str) -> str:
+        """Poll gh until a CI run appears for branch (up to 30s); return its ID."""
+        env = self._gh_env()
         for _ in range(6):
             time.sleep(5)
             result = subprocess.run(
@@ -787,16 +772,16 @@ class WorkflowDev(Workflow):
                 capture_output=True, text=True, env=env,
             )
             if result.returncode == 0 and result.stdout.strip():
-                run_id = result.stdout.strip()
-                break
-        if not run_id:
-            raise RuntimeError(
-                f"No CI run found for branch {branch} after 30s. "
-                f"Check that GitHub Actions is configured to run on this branch."
-            )
-        deadline = time.time() + self.CI_TIMEOUT
+                return result.stdout.strip()
+        raise RuntimeError(
+            f"No CI run found for branch {branch} after 30s. "
+            f"Check that GitHub Actions is configured to run on this branch."
+        )
 
-        # Poll until run completes or timeout
+    def _wait_for_ci_run(self, run_id: str) -> None:
+        """Poll a CI run until completion or timeout; raise if it fails."""
+        env = self._gh_env()
+        deadline = time.time() + self.CI_TIMEOUT
         while time.time() < deadline:
             result = subprocess.run(
                 ["gh", "run", "view", str(run_id),
@@ -805,14 +790,10 @@ class WorkflowDev(Workflow):
                 capture_output=True, text=True, env=env,
             )
             if result.returncode != 0:
-                raise RuntimeError(
-                    f"Failed to check CI run {run_id}: {result.stderr}"
-                )
-
+                raise RuntimeError(f"Failed to check CI run {run_id}: {result.stderr}")
             parts = result.stdout.strip().split()
             status = parts[0] if parts else "unknown"
             conclusion = parts[1] if len(parts) > 1 else ""
-
             if status == "completed":
                 if conclusion != "success":
                     raise RuntimeError(
@@ -820,9 +801,7 @@ class WorkflowDev(Workflow):
                         f"Fix before requesting review: gh run view {run_id}"
                     )
                 return
-
             time.sleep(10)
-
         raise RuntimeError(
             f"CI run {run_id} timed out after {self.CI_TIMEOUT // 60} minutes. "
             f"Check manually: gh run view {run_id}"

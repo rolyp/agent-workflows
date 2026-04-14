@@ -278,10 +278,6 @@ class CheckWriteTest(TestFixture):
         self.assertIn("Edit tool", msg)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GitHubIssuesTest(TestFixture):
     """Tests for issue-based triage: approve_triage reads review issue, promotes findings."""
 
@@ -366,3 +362,6 @@ class GitHubIssuesTest(TestFixture):
         self.assertEqual(mock_create.call_args_list[0][0][0], "Accepted finding")
         self.assertEqual(mock_create.call_args_list[1][0][0], "Another accepted")
 
+
+if __name__ == "__main__":
+    unittest.main()

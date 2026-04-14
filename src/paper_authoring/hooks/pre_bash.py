@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Add agent-workflows to path for imports
 sys.path.insert(0, str(Path.cwd() / "workflow" / "agent-workflows" / "src"))
-from dispatch import get_workflow
+from paper_authoring.workflow import PaperAuthoring
 
 
 def main() -> None:
@@ -18,7 +18,7 @@ def main() -> None:
         return
 
     try:
-        workflow = get_workflow(Path.cwd())
+        workflow = PaperAuthoring(Path.cwd())
     except FileNotFoundError:
         return  # project doesn't use this workflow — allow through
     except Exception as e:

@@ -152,8 +152,8 @@ class PaperAuthoring(Workflow):
     def _phase_enum(self) -> type[Phase]:
         return Phase
 
-    # Fields carried forward from the previous frame unless overridden
-    _CARRY_FORWARD = ("regions", "description", "note_link", "plan_link", "subtasks", "issue_url")
+    def _read_phase(self) -> Phase:
+        return Phase(self.read_state()["phase"])
 
     @staticmethod
     def _normalize_regions(regions: object) -> list[list[str]]:
@@ -162,13 +162,9 @@ class PaperAuthoring(Workflow):
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
-        """Replace top frame, carrying forward paper-authoring-specific fields."""
-        prev = self.read_state()
+        """Replace top frame, normalizing regions if provided."""
         if "regions" in extra and extra["regions"] is not None:
             extra["regions"] = self._normalize_regions(extra["regions"])
-        for key in self._CARRY_FORWARD:
-            if key not in extra and key in prev:
-                extra[key] = prev[key]
         super()._write_state(phase, task, **extra)
 
     def _push_state(self, phase: Enum, task: str | None = None,
@@ -189,7 +185,7 @@ class PaperAuthoring(Workflow):
 
     def begin_triage(self) -> None:
         """Enter triage phase."""
-        self._write_state(Phase.TRIAGE)
+        self._update_state(phase=Phase.TRIAGE)
 
     def reclassify(self, note_id: str, target: str) -> None:
         """Move a note between structural.md and minor-issues.md.
@@ -223,7 +219,7 @@ class PaperAuthoring(Workflow):
         repo = self.get_repo()
         review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
         self.close_issue(review_url)
-        self._write_state(Phase.IDLE)
+        self._update_state(phase=Phase.IDLE)
 
     # --- Task selection ---
 
@@ -308,41 +304,41 @@ class PaperAuthoring(Workflow):
 
     def end_task(self) -> None:
         """Complete the current task or subtask."""
-        stack = self._read_stack()
-
         for path in (self._tex_files_containing(EDIT_START)
                      + self._tex_files_containing(REVIEW_START)):
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
         self._build()
-
-        if len(stack) > 1:
-            completed_task = self.read_state().get("task")
-            subtask_url = self.read_state().get("issue_url")
-            self._pop_state(validate=False)
-            # Close sub-issue if linked
-            if subtask_url:
-                self.close_issue(subtask_url)
-            # Mark subtask as completed in parent's list
-            parent_stack = self._read_stack()
-            for st in parent_stack[-1].get("subtasks", []):
-                if st.get("id") == completed_task:
-                    st["completed"] = True
-            self._save_stack(parent_stack, validate=False)
-            parent = self.read_state()
-            parent_regions = parent.get("regions", [])
-            for file_path, passage in parent_regions:
-                full_path = self.root / file_path
-                if full_path.exists() and passage in full_path.read_text():
-                    self._place_bars(file_path, passage, EDIT_START, EDIT_END)
-            self.assert_valid()
+        if len(self._read_stack()) > 1:
+            self._complete_subtask()
         else:
-            # Close GitHub issue if linked
-            state = self.read_state()
-            issue_url = state.get("issue_url")
-            if issue_url:
-                self.close_issue(issue_url)
-            self._write_state(Phase.IDLE)
+            self._complete_top_level_task()
+
+    def _complete_subtask(self) -> None:
+        """Pop a subtask frame, close its issue, mark it completed on parent, restore parent's edit bars."""
+        completed_task = self.read_state().get("task")
+        subtask_url = self.read_state().get("issue_url")
+        self._pop_state(validate=False)
+        if subtask_url:
+            self.close_issue(subtask_url)
+        parent_stack = self._read_stack()
+        for st in parent_stack[-1].get("subtasks", []):
+            if st.get("id") == completed_task:
+                st["completed"] = True
+        self._save_stack(parent_stack, validate=False)
+        parent_regions = self.read_state().get("regions", [])
+        for file_path, passage in parent_regions:
+            full_path = self.root / file_path
+            if full_path.exists() and passage in full_path.read_text():
+                self._place_bars(file_path, passage, EDIT_START, EDIT_END)
+        self.assert_valid()
+
+    def _complete_top_level_task(self) -> None:
+        """Close the task's GH issue (if any) and return to idle."""
+        issue_url = self.read_state().get("issue_url")
+        if issue_url:
+            self.close_issue(issue_url)
+        self._update_state(phase=Phase.IDLE)
 
     # --- Subtasks ---
 
@@ -427,10 +423,8 @@ class PaperAuthoring(Workflow):
             text = text.replace(EDIT_END, REVIEW_END)
             Path(path).write_text(text)
         self._build()
-        state = self.read_state()
-        task = state.get("task")
-        self._write_state(Phase.AUTHOR_REVIEW, task)
-        issue_url = state.get("issue_url")
+        self._update_state(phase=Phase.AUTHOR_REVIEW)
+        issue_url = self.read_state().get("issue_url")
         if issue_url:
             self.set_issue_label(issue_url, self.LABEL_REVIEW)
 
@@ -442,10 +436,8 @@ class PaperAuthoring(Workflow):
             text = text.replace(REVIEW_END, EDIT_END)
             Path(path).write_text(text)
         self._build()
-        state = self.read_state()
-        task = state.get("task")
-        self._write_state(Phase.EDIT, task)
-        issue_url = state.get("issue_url")
+        self._update_state(phase=Phase.EDIT)
+        issue_url = self.read_state().get("issue_url")
         if issue_url:
             self.set_issue_label(issue_url, self.LABEL_EDIT)
 
@@ -492,38 +484,44 @@ class PaperAuthoring(Workflow):
         Returns (allowed, message). If not allowed, message explains
         what state transition is needed.
         """
-        phase = self._read_phase()
-        state = self.read_state()
-        task = state.get("task") or "unknown"
-
         rel_path = self._resolve(file_path)
         if rel_path is None:
             return True, ""  # outside project root
+        phase = self._read_phase()
 
-        # Protected files: never editable directly
+        result = self._check_protected_path(rel_path)
+        if result is not None:
+            return result
+        result = self._check_plan_file(rel_path, phase)
+        if result is not None:
+            return result
+        if not file_path.endswith(".tex"):
+            return True, ""
+        result = self._check_tex_phase(phase)
+        if result is not None:
+            return result
+        return self._check_tex_content(file_path, old_string, new_string, phase)
+
+    def _check_protected_path(self, rel_path: str) -> tuple[bool, str] | None:
         for protected in PROTECTED_FILES:
             if rel_path == protected or rel_path.endswith(protected):
                 return False, (
                     f"Cannot edit {protected} directly. "
                     f"Use PaperAuthoring commands to modify workflow state."
                 )
+        return None
 
-        # .md files in workflow/plans: only during planning, only the active plan
-        if "workflow/plans/" in rel_path and rel_path.endswith(".md"):
-            if phase is not Phase.PLANNING:
-                return False, (
-                    f"Cannot edit plan files outside planning phase. "
-                    f"Use `workflow.py {CMD_CREATE_PLAN}` first."
-                )
-            return True, ""
+    def _check_plan_file(self, rel_path: str, phase: Phase) -> tuple[bool, str] | None:
+        if not ("workflow/plans/" in rel_path and rel_path.endswith(".md")):
+            return None
+        if phase is not Phase.PLANNING:
+            return False, (
+                f"Cannot edit plan files outside planning phase. "
+                f"Use `workflow.py {CMD_CREATE_PLAN}` first."
+            )
+        return True, ""
 
-        # Non-.tex files: allow (e.g. .bib, structural.md, minor-issues.md)
-        if not file_path.endswith(".tex"):
-            return True, ""
-
-        # --- .tex-specific checks below ---
-
-        # Phase-based blocks
+    def _check_tex_phase(self, phase: Phase) -> tuple[bool, str] | None:
         if phase is Phase.IDLE:
             return False, (
                 f"No active task. Use `workflow.py {CMD_BEGIN_TASK}` or "
@@ -539,39 +537,39 @@ class PaperAuthoring(Workflow):
                 "Cannot edit .tex files during planning phase. "
                 f"Run `workflow.py {CMD_APPROVE_PLAN}` to return to edit phase first."
             )
+        return None
 
-        # Change markup required in all .tex edits
+    def _check_tex_content(self, file_path: str, old_string: str | None,
+                           new_string: str | None, phase: Phase) -> tuple[bool, str]:
         if new_string is not None and not any(cmd in new_string for cmd in CHANGE_MARKUP):
             return False, (
                 "All .tex edits must use change markup "
                 "(\\added, \\deleted, or \\replaced)."
             )
-
-        # Edits must be within bars (edit or review)
-        if old_string is not None:
-            full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
-            if full_path.exists():
-                content = full_path.read_text()
-                in_edit = self._text_within_bars(content, old_string, EDIT_START, EDIT_END)
-                in_review = self._text_within_bars(content, old_string, REVIEW_START, REVIEW_END)
-                if not in_edit and not in_review:
-                    return False, (
-                        f"Edit target is outside change bars in {file_path}. "
-                        f"Use `open-review` (ad hoc) or `open-edit` (task) first."
-                    )
-                # During edit phase, must be in edit bars specifically
-                if phase is Phase.EDIT and not in_edit:
-                    return False, (
-                        f"Edit target is in review bars but phase is 'edit'. "
-                        f"Edits during 'edit' phase must be within {EDIT_START}/{EDIT_END}."
-                    )
-                # During author-review, no edits allowed
-                if phase is Phase.AUTHOR_REVIEW:
-                    return False, (
-                        f"Cannot edit .tex files during author-review phase (task: {task}). "
-                        f"Run `workflow.py {CMD_REVIEW_TO_EDIT}` first."
-                    )
-
+        if old_string is None:
+            return True, ""
+        full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
+        if not full_path.exists():
+            return True, ""
+        content = full_path.read_text()
+        in_edit = self._text_within_bars(content, old_string, EDIT_START, EDIT_END)
+        in_review = self._text_within_bars(content, old_string, REVIEW_START, REVIEW_END)
+        if not in_edit and not in_review:
+            return False, (
+                f"Edit target is outside change bars in {file_path}. "
+                f"Use `open-review` (ad hoc) or `open-edit` (task) first."
+            )
+        if phase is Phase.EDIT and not in_edit:
+            return False, (
+                f"Edit target is in review bars but phase is 'edit'. "
+                f"Edits during 'edit' phase must be within {EDIT_START}/{EDIT_END}."
+            )
+        if phase is Phase.AUTHOR_REVIEW:
+            task = self.read_state().get("task") or "unknown"
+            return False, (
+                f"Cannot edit .tex files during author-review phase (task: {task}). "
+                f"Run `workflow.py {CMD_REVIEW_TO_EDIT}` first."
+            )
         return True, ""
 
     def check_write(self, file_path: str) -> tuple[bool, str]:
