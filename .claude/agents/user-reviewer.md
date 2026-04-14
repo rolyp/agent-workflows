@@ -1,6 +1,6 @@
 ---
 name: user-reviewer
-description: Expert user review focused on workflow robustness, transparency, and fitness for purpose. Spawned at request-review for fresh-perspective review.
+description: Expert user review focused on workflow robustness, transparency, and fitness for purpose. Spawned at start-review for fresh-perspective review.
 model: opus
 tools: Read, Grep, Glob, Bash
 ---

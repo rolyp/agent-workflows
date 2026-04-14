@@ -37,9 +37,9 @@ Every behaviour change must be preceded by refactoring that makes the change min
 
 ## CI protocol
 
-Post-push hook automatically records the CI run ID. `request-review` will block until CI passes. If CI fails, `request-review` will report the failure and you must fix before proceeding.
+Post-push hook automatically records the CI run ID. `start-review` will block until CI passes. If CI fails, `start-review` will report the failure and you must fix before proceeding.
 
 ## Working with other skills
 
 - **Tester**: invoke for writing new tests or diagnosing test failures. For quick test runs, invoke inline
-- **User Reviewer** + **Architect Reviewer**: both invoked as parallel subagents at `request-review`. They run in separate context (fresh perspective). Collate their findings and present to Developer for `respond-review/approve` or `respond-review/feedback`
+- **User Reviewer** + **Architect Reviewer**: both invoked as parallel subagents at `start-review`. They run in separate context (fresh perspective). Collate their findings and present to Developer for `respond-review/approve` or `respond-review/feedback`

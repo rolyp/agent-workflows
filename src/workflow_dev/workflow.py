@@ -47,6 +47,7 @@ CMD_BEGIN_MODIFY = "begin-modify"
 CMD_END_STEP = "end-step"
 CMD_ABORT_STEP = "abort-step"
 CMD_REQUEST_REVIEW = "request-review"
+CMD_START_REVIEW = "start-review"
 CMD_SUBMIT_REVIEW = "submit-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
@@ -440,7 +441,7 @@ class WorkflowDev(Workflow):
             body = body.rstrip() + f"\n\n{rendered_section}\n"
         self._write_issue_body(issue_url, body)
 
-    def request_review(self) -> dict[str, str]:
+    def start_review(self) -> dict[str, str]:
         """Request code review. Pushes branch, runs tests, creates one review issue per role.
 
         Returns a mapping {role: review_issue_url} so the caller (Dev Assistant)
@@ -465,6 +466,9 @@ class WorkflowDev(Workflow):
         self._write_state(Phase.REVIEW, state.get("task"))
         self._set_label(self.LABEL_REVIEW)
         return {role: self._create_review_issue(role) for role in self.REVIEW_ROLES}
+
+    # Deprecated alias; will be removed once all callers migrate.
+    request_review = start_review
 
     REVIEW_ROLES = ("user", "architect")
 
@@ -921,8 +925,8 @@ def main() -> None:
         reason = sys.argv[2] if len(sys.argv) > 2 else ""
         wd.abort_step(reason)
         print(f"Step aborted; back to idle" + (f" ({reason})" if reason else ""))
-    elif command == CMD_REQUEST_REVIEW:
-        urls = wd.request_review()
+    elif command in (CMD_START_REVIEW, CMD_REQUEST_REVIEW):
+        urls = wd.start_review()
         print("Review requested; edits blocked. Spawn each reviewer with their URL:")
         for role, url in urls.items():
             print(f"  {role}: {url}")

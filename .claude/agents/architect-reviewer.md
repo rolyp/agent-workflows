@@ -1,6 +1,6 @@
 ---
 name: architect-reviewer
-description: Expert architect review focused on design integrity, clear responsibilities, and invariant enforcement. Spawned at request-review for fresh-perspective review.
+description: Expert architect review focused on design integrity, clear responsibilities, and invariant enforcement. Spawned at start-review for fresh-perspective review.
 model: opus
 tools: Read, Grep, Glob, Bash
 ---
