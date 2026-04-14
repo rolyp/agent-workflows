@@ -152,6 +152,9 @@ class PaperAuthoring(Workflow):
     def _phase_enum(self) -> type[Phase]:
         return Phase
 
+    def _read_phase(self) -> Phase:
+        return Phase(self.read_state()["phase"])
+
     @staticmethod
     def _normalize_regions(regions: object) -> list[list[str]]:
         """Convert regions to list-of-lists format for JSON serialization."""
@@ -481,38 +484,44 @@ class PaperAuthoring(Workflow):
         Returns (allowed, message). If not allowed, message explains
         what state transition is needed.
         """
-        phase = self._read_phase()
-        state = self.read_state()
-        task = state.get("task") or "unknown"
-
         rel_path = self._resolve(file_path)
         if rel_path is None:
             return True, ""  # outside project root
+        phase = self._read_phase()
 
-        # Protected files: never editable directly
+        result = self._check_protected_path(rel_path)
+        if result is not None:
+            return result
+        result = self._check_plan_file(rel_path, phase)
+        if result is not None:
+            return result
+        if not file_path.endswith(".tex"):
+            return True, ""
+        result = self._check_tex_phase(phase)
+        if result is not None:
+            return result
+        return self._check_tex_content(file_path, old_string, new_string, phase)
+
+    def _check_protected_path(self, rel_path: str) -> tuple[bool, str] | None:
         for protected in PROTECTED_FILES:
             if rel_path == protected or rel_path.endswith(protected):
                 return False, (
                     f"Cannot edit {protected} directly. "
                     f"Use PaperAuthoring commands to modify workflow state."
                 )
+        return None
 
-        # .md files in workflow/plans: only during planning, only the active plan
-        if "workflow/plans/" in rel_path and rel_path.endswith(".md"):
-            if phase is not Phase.PLANNING:
-                return False, (
-                    f"Cannot edit plan files outside planning phase. "
-                    f"Use `workflow.py {CMD_CREATE_PLAN}` first."
-                )
-            return True, ""
+    def _check_plan_file(self, rel_path: str, phase: Phase) -> tuple[bool, str] | None:
+        if not ("workflow/plans/" in rel_path and rel_path.endswith(".md")):
+            return None
+        if phase is not Phase.PLANNING:
+            return False, (
+                f"Cannot edit plan files outside planning phase. "
+                f"Use `workflow.py {CMD_CREATE_PLAN}` first."
+            )
+        return True, ""
 
-        # Non-.tex files: allow (e.g. .bib, structural.md, minor-issues.md)
-        if not file_path.endswith(".tex"):
-            return True, ""
-
-        # --- .tex-specific checks below ---
-
-        # Phase-based blocks
+    def _check_tex_phase(self, phase: Phase) -> tuple[bool, str] | None:
         if phase is Phase.IDLE:
             return False, (
                 f"No active task. Use `workflow.py {CMD_BEGIN_TASK}` or "
@@ -528,39 +537,39 @@ class PaperAuthoring(Workflow):
                 "Cannot edit .tex files during planning phase. "
                 f"Run `workflow.py {CMD_APPROVE_PLAN}` to return to edit phase first."
             )
+        return None
 
-        # Change markup required in all .tex edits
+    def _check_tex_content(self, file_path: str, old_string: str | None,
+                           new_string: str | None, phase: Phase) -> tuple[bool, str]:
         if new_string is not None and not any(cmd in new_string for cmd in CHANGE_MARKUP):
             return False, (
                 "All .tex edits must use change markup "
                 "(\\added, \\deleted, or \\replaced)."
             )
-
-        # Edits must be within bars (edit or review)
-        if old_string is not None:
-            full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
-            if full_path.exists():
-                content = full_path.read_text()
-                in_edit = self._text_within_bars(content, old_string, EDIT_START, EDIT_END)
-                in_review = self._text_within_bars(content, old_string, REVIEW_START, REVIEW_END)
-                if not in_edit and not in_review:
-                    return False, (
-                        f"Edit target is outside change bars in {file_path}. "
-                        f"Use `open-review` (ad hoc) or `open-edit` (task) first."
-                    )
-                # During edit phase, must be in edit bars specifically
-                if phase is Phase.EDIT and not in_edit:
-                    return False, (
-                        f"Edit target is in review bars but phase is 'edit'. "
-                        f"Edits during 'edit' phase must be within {EDIT_START}/{EDIT_END}."
-                    )
-                # During author-review, no edits allowed
-                if phase is Phase.AUTHOR_REVIEW:
-                    return False, (
-                        f"Cannot edit .tex files during author-review phase (task: {task}). "
-                        f"Run `workflow.py {CMD_REVIEW_TO_EDIT}` first."
-                    )
-
+        if old_string is None:
+            return True, ""
+        full_path = self.root / file_path if not Path(file_path).is_absolute() else Path(file_path)
+        if not full_path.exists():
+            return True, ""
+        content = full_path.read_text()
+        in_edit = self._text_within_bars(content, old_string, EDIT_START, EDIT_END)
+        in_review = self._text_within_bars(content, old_string, REVIEW_START, REVIEW_END)
+        if not in_edit and not in_review:
+            return False, (
+                f"Edit target is outside change bars in {file_path}. "
+                f"Use `open-review` (ad hoc) or `open-edit` (task) first."
+            )
+        if phase is Phase.EDIT and not in_edit:
+            return False, (
+                f"Edit target is in review bars but phase is 'edit'. "
+                f"Edits during 'edit' phase must be within {EDIT_START}/{EDIT_END}."
+            )
+        if phase is Phase.AUTHOR_REVIEW:
+            task = self.read_state().get("task") or "unknown"
+            return False, (
+                f"Cannot edit .tex files during author-review phase (task: {task}). "
+                f"Run `workflow.py {CMD_REVIEW_TO_EDIT}` first."
+            )
         return True, ""
 
     def check_write(self, file_path: str) -> tuple[bool, str]:
