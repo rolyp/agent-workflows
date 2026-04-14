@@ -750,18 +750,18 @@ class WorkflowDev(Workflow):
 
     def _check_ci(self) -> None:
         """Wait for CI on the current branch to complete. Blocks until done."""
-        env = self._gh_env()
-
-        # Get current branch
         branch = subprocess.run(
             ["git", "branch", "--show-current"],
             capture_output=True, text=True, cwd=self.root,
         ).stdout.strip()
         if not branch:
             return  # detached HEAD, skip CI check
+        run_id = self._find_ci_run_id(branch)
+        self._wait_for_ci_run(run_id)
 
-        # Wait for run to appear (retry up to 30s)
-        run_id = None
+    def _find_ci_run_id(self, branch: str) -> str:
+        """Poll gh until a CI run appears for branch (up to 30s); return its ID."""
+        env = self._gh_env()
         for _ in range(6):
             time.sleep(5)
             result = subprocess.run(
@@ -770,16 +770,16 @@ class WorkflowDev(Workflow):
                 capture_output=True, text=True, env=env,
             )
             if result.returncode == 0 and result.stdout.strip():
-                run_id = result.stdout.strip()
-                break
-        if not run_id:
-            raise RuntimeError(
-                f"No CI run found for branch {branch} after 30s. "
-                f"Check that GitHub Actions is configured to run on this branch."
-            )
-        deadline = time.time() + self.CI_TIMEOUT
+                return result.stdout.strip()
+        raise RuntimeError(
+            f"No CI run found for branch {branch} after 30s. "
+            f"Check that GitHub Actions is configured to run on this branch."
+        )
 
-        # Poll until run completes or timeout
+    def _wait_for_ci_run(self, run_id: str) -> None:
+        """Poll a CI run until completion or timeout; raise if it fails."""
+        env = self._gh_env()
+        deadline = time.time() + self.CI_TIMEOUT
         while time.time() < deadline:
             result = subprocess.run(
                 ["gh", "run", "view", str(run_id),
@@ -788,14 +788,10 @@ class WorkflowDev(Workflow):
                 capture_output=True, text=True, env=env,
             )
             if result.returncode != 0:
-                raise RuntimeError(
-                    f"Failed to check CI run {run_id}: {result.stderr}"
-                )
-
+                raise RuntimeError(f"Failed to check CI run {run_id}: {result.stderr}")
             parts = result.stdout.strip().split()
             status = parts[0] if parts else "unknown"
             conclusion = parts[1] if len(parts) > 1 else ""
-
             if status == "completed":
                 if conclusion != "success":
                     raise RuntimeError(
@@ -803,9 +799,7 @@ class WorkflowDev(Workflow):
                         f"Fix before requesting review: gh run view {run_id}"
                     )
                 return
-
             time.sleep(10)
-
         raise RuntimeError(
             f"CI run {run_id} timed out after {self.CI_TIMEOUT // 60} minutes. "
             f"Check manually: gh run view {run_id}"
