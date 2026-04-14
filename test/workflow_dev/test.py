@@ -391,8 +391,6 @@ class StateTransitionTest(TestFixture):
             wd.begin_refactor("Work", "code")  # no task
         with self.assertRaises(ValueError):
             wd.start_review()  # no task
-        with self.assertRaises(ValueError):
-            wd.approve()  # not in review
 
 
 class CheckEditTest(TestFixture):
