@@ -608,7 +608,7 @@ class PaperAuthoring(Workflow):
             )
         return True, ""
 
-    def check_bash(self, command: str) -> tuple[bool, str]:
+    def check_bash(self, command: str, agent_type: str | None = None) -> tuple[bool, str]:
         """Gate shell commands: block writes to protected files via shell."""
         cmd = command.strip()
         # Detect common shell write patterns targeting protected files

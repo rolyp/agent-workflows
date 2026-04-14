@@ -19,6 +19,7 @@ from workflow_dev.workflow import WorkflowDev
 def main() -> None:
     tool_input = json.load(sys.stdin)
     command = tool_input.get("tool_input", {}).get("command", "")
+    agent_type = tool_input.get("agent_type")
 
     if not command:
         return
@@ -27,7 +28,7 @@ def main() -> None:
     if wd.is_protocol_suspended():
         return
 
-    allowed, message = wd.check_bash(command)
+    allowed, message = wd.check_bash(command, agent_type=agent_type)
     if not allowed:
         print(message, file=sys.stderr)
         sys.exit(2)

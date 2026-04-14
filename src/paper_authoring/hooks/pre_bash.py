@@ -13,6 +13,7 @@ from dispatch import get_workflow
 def main() -> None:
     tool_input = json.load(sys.stdin)
     command = tool_input.get("tool_input", {}).get("command", "")
+    agent_type = tool_input.get("agent_type")
     if not command:
         return
 
@@ -24,7 +25,7 @@ def main() -> None:
         print(f"Workflow construction failed: {e}", file=sys.stderr)
         sys.exit(2)  # fail closed
 
-    allowed, message = workflow.check_bash(command)
+    allowed, message = workflow.check_bash(command, agent_type=agent_type)
 
     if not allowed:
         print(message, file=sys.stderr)

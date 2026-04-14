@@ -668,9 +668,9 @@ class Workflow(ABC):
         """Check whether a Write to file_path is allowed."""
 
     @abstractmethod
-    def check_bash(self, command: str) -> tuple[bool, str]:
+    def check_bash(self, command: str, agent_type: str | None = None) -> tuple[bool, str]:
         """Check whether a Bash command is allowed.
 
-        Returns (allowed, message). If not allowed, message explains
-        what is blocked and why.
+        agent_type: name of the calling subagent (from Claude Code hook input),
+        or None for the main agent. Subclasses may route differently per caller.
         """

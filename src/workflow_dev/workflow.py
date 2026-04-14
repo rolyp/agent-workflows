@@ -761,9 +761,32 @@ class WorkflowDev(Workflow):
             return True, ""
         return self.check_file_access(rel_path)
 
-    def check_bash(self, command: str) -> tuple[bool, str]:
-        """Gate shell commands: whitelist read-only and workflow commands; gate rm via check_file_access."""
+    REVIEWER_AGENTS = ("user-reviewer", "architect-reviewer")
+    _FINISH_REVIEW_PREFIX = "python3 src/workflow_dev/workflow.py finish-review/"
+
+    def check_bash(self, command: str, agent_type: str | None = None) -> tuple[bool, str]:
+        """Gate shell commands by caller.
+
+        Reviewer subagents: read-only commands + finish-review/* only.
+        Dev Assistant (no agent_type): existing whitelist; finish-review/* is blocked.
+        """
         cmd = command.strip()
+        if agent_type in self.REVIEWER_AGENTS:
+            if cmd.startswith(self._FINISH_REVIEW_PREFIX):
+                return True, ""
+            for prefix in self._BASH_READ_ONLY:
+                if cmd.startswith(prefix):
+                    return True, ""
+            for pattern in self._BASH_REGEX:
+                if re.match(pattern, cmd):
+                    return True, ""
+            return False, (
+                f"Reviewer ({agent_type}) may only read code and call "
+                f"finish-review/{{approve,feedback}}. Blocked: {command[:80]}"
+            )
+        # Main agent (Dev Assistant): finish-review/* is reviewer-only
+        if cmd.startswith(self._FINISH_REVIEW_PREFIX):
+            return False, "finish-review/* is for reviewer subagents only."
         if self._is_whitelisted(cmd):
             return True, ""
         if cmd.startswith("rm "):
