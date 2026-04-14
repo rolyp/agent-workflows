@@ -265,53 +265,68 @@ class StateTransitionTest(TestFixture):
         expected_labels = {wd._reviewer_label(role) for role in wd.REVIEW_ROLES}
         self.assertEqual(labels_added, expected_labels)
 
+    def _blocker(self, role: str, state: str, body: str = "") -> dict:
+        """Construct a blocker dict as all_blockers would return."""
+        return {"state": state, "body": body, "labels": [f"reviewer:{role}"]}
+
     @patch.object(WorkflowDev, "close_issue")
-    @patch.object(WorkflowDev, "_review_status")
-    def test_finish_review_approve_transitions_to_approved_when_all_done(self, mock_status, mock_close):
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_approve_transitions_to_approved_when_all_done(self, mock_blockers, mock_close):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.start_review()
-        mock_status.return_value = {"user": "done", "architect": "done"}
+        mock_blockers.return_value = [
+            self._blocker("user", "closed"),
+            self._blocker("architect", "closed"),
+        ]
         wd.finish_review_approve("https://github.com/test/repo/issues/99")
         self.assertEqual(wd.read_state()["phase"], "approved")
         mock_close.assert_called_once_with("https://github.com/test/repo/issues/99")
 
     @patch.object(WorkflowDev, "_write_issue_body")
-    @patch.object(WorkflowDev, "_review_status")
-    def test_finish_review_feedback_transitions_to_refactoring_when_no_missing(self, mock_status, mock_write):
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_feedback_transitions_to_refactoring_when_feedback_pending(self, mock_blockers, mock_write):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.start_review()
-        mock_status.return_value = {"user": "pending", "architect": "done"}
+        # user responded with feedback (open, has body); architect approved (closed)
+        mock_blockers.return_value = [
+            self._blocker("user", "open", body="Findings here"),
+            self._blocker("architect", "closed"),
+        ]
         wd.finish_review_feedback("https://github.com/test/repo/issues/99", "Findings here")
         self.assertEqual(wd.read_state()["phase"], "refactoring")
         mock_write.assert_called_once()
 
     @patch.object(WorkflowDev, "close_issue")
-    @patch.object(WorkflowDev, "_review_status")
-    def test_finish_review_does_not_transition_when_role_missing(self, mock_status, mock_close):
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_does_not_transition_when_role_missing(self, mock_blockers, mock_close):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.start_review()
-        mock_status.return_value = {"user": "done", "architect": "missing"}
+        # user done; architect has no blocker (missing)
+        mock_blockers.return_value = [self._blocker("user", "closed")]
         wd.finish_review_approve("https://github.com/test/repo/issues/99")
         self.assertEqual(wd.read_state()["phase"], "review")
 
     @patch.object(WorkflowDev, "close_issue")
-    @patch.object(WorkflowDev, "_review_status")
-    def test_finish_review_does_not_transition_when_not_in_review(self, mock_status, mock_close):
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_does_not_transition_when_not_in_review(self, mock_blockers, mock_close):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        # Parent stays in refactoring (no request-review)
-        mock_status.return_value = {"user": "done", "architect": "done"}
+        # Parent stays in refactoring (no start-review)
+        mock_blockers.return_value = [
+            self._blocker("user", "closed"),
+            self._blocker("architect", "closed"),
+        ]
         wd.finish_review_approve("https://github.com/test/repo/issues/99")
         self.assertEqual(wd.read_state()["phase"], "refactoring")
 
