@@ -464,8 +464,7 @@ class WorkflowDev(Workflow):
             if result.returncode != 0:
                 raise RuntimeError(f"Push failed: {result.stderr}")
             self._check_ci()
-        state = self.read_state()
-        self._write_state(Phase.REVIEW, state.get("task"), issue_url=state.get("issue_url"))
+        self._update_state(phase=Phase.REVIEW)
         self._set_label(self.LABEL_REVIEW)
         return {role: self._create_review_issue(role) for role in self.REVIEW_ROLES}
 
@@ -526,13 +525,12 @@ class WorkflowDev(Workflow):
                 status[role] = ReviewStatus.IN_PROGRESS
         # Transition only when every reviewer has given a verdict.
         if all(s is not ReviewStatus.IN_PROGRESS for s in status.values()):
-            state = self.read_state()
             if all(s is ReviewStatus.DONE for s in status.values()):
-                self._write_state(Phase.APPROVED, state.get("task"), issue_url=state.get("issue_url"))
+                self._update_state(phase=Phase.APPROVED)
                 self._set_label(self.LABEL_IDLE)
                 self._commit_state("state: approved (auto from review)")
             else:
-                self._write_state(Phase.REFACTORING, state.get("task"), issue_url=state.get("issue_url"))
+                self._update_state(phase=Phase.REFACTORING)
                 self._set_label(self.LABEL_IDLE)
                 self._commit_state("state: refactoring (auto from review)")
 
@@ -588,7 +586,7 @@ class WorkflowDev(Workflow):
         issue_url = self._issue_url_from_state()
         if issue_url:
             self.close_issue(issue_url)
-        self._write_state(Phase.IDLE, issue_url=None)
+        self._update_state(phase=Phase.IDLE, issue_url=None)
 
     def suspend_task(self) -> None:
         """Park the current task. Switches to main, sets issue to Paused."""
@@ -607,7 +605,7 @@ class WorkflowDev(Workflow):
         if issue_url:
             self.set_issue_status(issue_url, "Paused")
             self.clear_issue_labels(issue_url)
-        self._write_state(Phase.IDLE, issue_url=issue_url)
+        self._update_state(phase=Phase.IDLE)
         self._commit_state("state: idle (task suspended)")
         result = subprocess.run(
             ["git", "switch", "main"],
@@ -643,8 +641,7 @@ class WorkflowDev(Workflow):
                 f"approve-task requires an active task in refactoring or review phase "
                 f"(current: {phase.value})"
             )
-        state = self.read_state()
-        self._write_state(Phase.APPROVED, state.get("task"), issue_url=state.get("issue_url"))
+        self._update_state(phase=Phase.APPROVED)
         self._commit_state("state: approved")
 
     # --- Hook gates ---
