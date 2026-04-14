@@ -304,41 +304,41 @@ class PaperAuthoring(Workflow):
 
     def end_task(self) -> None:
         """Complete the current task or subtask."""
-        stack = self._read_stack()
-
         for path in (self._tex_files_containing(EDIT_START)
                      + self._tex_files_containing(REVIEW_START)):
             self._remove_bars(path, EDIT_START, EDIT_END)
             self._remove_bars(path, REVIEW_START, REVIEW_END)
         self._build()
-
-        if len(stack) > 1:
-            completed_task = self.read_state().get("task")
-            subtask_url = self.read_state().get("issue_url")
-            self._pop_state(validate=False)
-            # Close sub-issue if linked
-            if subtask_url:
-                self.close_issue(subtask_url)
-            # Mark subtask as completed in parent's list
-            parent_stack = self._read_stack()
-            for st in parent_stack[-1].get("subtasks", []):
-                if st.get("id") == completed_task:
-                    st["completed"] = True
-            self._save_stack(parent_stack, validate=False)
-            parent = self.read_state()
-            parent_regions = parent.get("regions", [])
-            for file_path, passage in parent_regions:
-                full_path = self.root / file_path
-                if full_path.exists() and passage in full_path.read_text():
-                    self._place_bars(file_path, passage, EDIT_START, EDIT_END)
-            self.assert_valid()
+        if len(self._read_stack()) > 1:
+            self._complete_subtask()
         else:
-            # Close GitHub issue if linked
-            state = self.read_state()
-            issue_url = state.get("issue_url")
-            if issue_url:
-                self.close_issue(issue_url)
-            self._update_state(phase=Phase.IDLE)
+            self._complete_top_level_task()
+
+    def _complete_subtask(self) -> None:
+        """Pop a subtask frame, close its issue, mark it completed on parent, restore parent's edit bars."""
+        completed_task = self.read_state().get("task")
+        subtask_url = self.read_state().get("issue_url")
+        self._pop_state(validate=False)
+        if subtask_url:
+            self.close_issue(subtask_url)
+        parent_stack = self._read_stack()
+        for st in parent_stack[-1].get("subtasks", []):
+            if st.get("id") == completed_task:
+                st["completed"] = True
+        self._save_stack(parent_stack, validate=False)
+        parent_regions = self.read_state().get("regions", [])
+        for file_path, passage in parent_regions:
+            full_path = self.root / file_path
+            if full_path.exists() and passage in full_path.read_text():
+                self._place_bars(file_path, passage, EDIT_START, EDIT_END)
+        self.assert_valid()
+
+    def _complete_top_level_task(self) -> None:
+        """Close the task's GH issue (if any) and return to idle."""
+        issue_url = self.read_state().get("issue_url")
+        if issue_url:
+            self.close_issue(issue_url)
+        self._update_state(phase=Phase.IDLE)
 
     # --- Subtasks ---
 
