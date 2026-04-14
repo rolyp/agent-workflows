@@ -189,7 +189,7 @@ class PaperAuthoring(Workflow):
 
     def begin_triage(self) -> None:
         """Enter triage phase."""
-        self._write_state(Phase.TRIAGE)
+        self._update_state(phase=Phase.TRIAGE)
 
     def reclassify(self, note_id: str, target: str) -> None:
         """Move a note between structural.md and minor-issues.md.
@@ -223,7 +223,7 @@ class PaperAuthoring(Workflow):
         repo = self.get_repo()
         review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
         self.close_issue(review_url)
-        self._write_state(Phase.IDLE)
+        self._update_state(phase=Phase.IDLE)
 
     # --- Task selection ---
 
@@ -342,7 +342,7 @@ class PaperAuthoring(Workflow):
             issue_url = state.get("issue_url")
             if issue_url:
                 self.close_issue(issue_url)
-            self._write_state(Phase.IDLE)
+            self._update_state(phase=Phase.IDLE)
 
     # --- Subtasks ---
 
@@ -427,10 +427,8 @@ class PaperAuthoring(Workflow):
             text = text.replace(EDIT_END, REVIEW_END)
             Path(path).write_text(text)
         self._build()
-        state = self.read_state()
-        task = state.get("task")
-        self._write_state(Phase.AUTHOR_REVIEW, task)
-        issue_url = state.get("issue_url")
+        self._update_state(phase=Phase.AUTHOR_REVIEW)
+        issue_url = self.read_state().get("issue_url")
         if issue_url:
             self.set_issue_label(issue_url, self.LABEL_REVIEW)
 
@@ -442,10 +440,8 @@ class PaperAuthoring(Workflow):
             text = text.replace(REVIEW_END, EDIT_END)
             Path(path).write_text(text)
         self._build()
-        state = self.read_state()
-        task = state.get("task")
-        self._write_state(Phase.EDIT, task)
-        issue_url = state.get("issue_url")
+        self._update_state(phase=Phase.EDIT)
+        issue_url = self.read_state().get("issue_url")
         if issue_url:
             self.set_issue_label(issue_url, self.LABEL_EDIT)
 
