@@ -154,12 +154,12 @@ class StateTransitionTest(TestFixture):
             wd.begin_modify("Add feature", rationale=[])
         self.assertIn("rationale", str(ctx.exception))
 
-    def test_request_review_only_from_idle(self):
+    def test_start_review_only_from_idle(self):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         with self.assertRaises(ValueError):
-            wd.request_review()
+            wd.start_review()
 
     def _submit_mock_reviews(self, wd):
         """Mark both reviews as submitted in state (without GitHub calls)."""
@@ -172,7 +172,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "test")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         self.assertEqual(wd.read_state()["phase"], "review")
         self._submit_mock_reviews(wd)
         wd.approve()
@@ -184,7 +184,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         self._submit_mock_reviews(wd)
         wd.feedback()
         state = wd.read_state()
@@ -198,7 +198,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         self._submit_mock_reviews(wd)
         mock_read.return_value = "Some text\n\n## Steps\n\n- [x] step one"
         wd.feedback(items=["Fix this", "Fix that"])
@@ -217,7 +217,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         self._submit_mock_reviews(wd)
         wd.feedback()
         mock_write.assert_not_called()
@@ -227,7 +227,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         with self.assertRaises(ValueError) as ctx:
             wd.feedback()
         self.assertIn("missing reviews", str(ctx.exception))
@@ -237,27 +237,27 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         with self.assertRaises(ValueError) as ctx:
             wd.approve()
         self.assertIn("missing reviews", str(ctx.exception))
 
-    def test_request_review_returns_url_per_role(self):
+    def test_start_review_returns_url_per_role(self):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        urls = wd.request_review()
+        urls = wd.start_review()
         self.assertEqual(set(urls.keys()), set(wd.REVIEW_ROLES))
         for url in urls.values():
             self.assertTrue(url.startswith("https://github.com/"))
 
-    def test_request_review_creates_issue_per_role(self):
+    def test_start_review_creates_issue_per_role(self):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         # create_issue called once per role
         self.assertEqual(wd.create_issue.call_count, len(wd.REVIEW_ROLES))
         # add_label called once per role with the corresponding reviewer label
@@ -272,7 +272,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         mock_status.return_value = {"user": "done", "architect": "done"}
         wd.finish_review_approve("https://github.com/test/repo/issues/99")
         self.assertEqual(wd.read_state()["phase"], "approved")
@@ -285,7 +285,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         mock_status.return_value = {"user": "pending", "architect": "done"}
         wd.finish_review_feedback("https://github.com/test/repo/issues/99", "Findings here")
         self.assertEqual(wd.read_state()["phase"], "refactoring")
@@ -298,7 +298,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         mock_status.return_value = {"user": "done", "architect": "missing"}
         wd.finish_review_approve("https://github.com/test/repo/issues/99")
         self.assertEqual(wd.read_state()["phase"], "review")
@@ -320,7 +320,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         with self.assertRaises(ValueError):
             wd.finish_review_feedback("https://github.com/test/repo/issues/99", "  ")
 
@@ -329,7 +329,7 @@ class StateTransitionTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         self._submit_mock_reviews(wd)
         wd.approve()
         wd.end_task()
@@ -434,7 +434,7 @@ class StateTransitionTest(TestFixture):
         with self.assertRaises(ValueError):
             wd.begin_refactor("Work", "code")  # no task
         with self.assertRaises(ValueError):
-            wd.request_review()  # no task
+            wd.start_review()  # no task
         with self.assertRaises(ValueError):
             wd.approve()  # not in review
 
@@ -493,7 +493,7 @@ class CheckEditTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
 
@@ -535,7 +535,7 @@ class CheckWriteTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         allowed, _ = wd.check_write("new_file.py")
         self.assertFalse(allowed)
 
