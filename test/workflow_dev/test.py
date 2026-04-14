@@ -242,6 +242,29 @@ class StateTransitionTest(TestFixture):
             wd.approve()
         self.assertIn("missing reviews", str(ctx.exception))
 
+    def test_request_review_returns_url_per_role(self):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        urls = wd.request_review()
+        self.assertEqual(set(urls.keys()), set(wd.REVIEW_ROLES))
+        for url in urls.values():
+            self.assertTrue(url.startswith("https://github.com/"))
+
+    def test_request_review_creates_issue_per_role(self):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.request_review()
+        # create_issue called once per role
+        self.assertEqual(wd.create_issue.call_count, len(wd.REVIEW_ROLES))
+        # add_label called once per role with the corresponding reviewer label
+        labels_added = {call.args[1] for call in wd.add_label.call_args_list}
+        expected_labels = {wd._reviewer_label(role) for role in wd.REVIEW_ROLES}
+        self.assertEqual(labels_added, expected_labels)
+
     @patch.object(WorkflowDev, "close_issue")
     @patch.object(WorkflowDev, "_review_status")
     def test_finish_review_approve_transitions_to_approved_when_all_done(self, mock_status, mock_close):
