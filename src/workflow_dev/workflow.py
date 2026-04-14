@@ -529,8 +529,7 @@ class WorkflowDev(Workflow):
         if self._read_phase() != Phase.REVIEW:
             return
         task_url = self._issue_url_from_state()
-        if not task_url:
-            return
+        assert task_url, "invariant: REVIEW phase implies active task with issue_url"
         blockers = self.all_blockers(task_url)
         status: dict[str, ReviewStatus] = {}
         for role in self.REVIEW_ROLES:
