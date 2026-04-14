@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
@@ -15,6 +16,14 @@ class ValidationError(Exception):
         super().__init__(f"{len(errors)} invariant(s) violated")
 
 
+@dataclass
+class ProjectInfo:
+    """GitHub project metadata cached from the first API call."""
+    project_id: str
+    status_field_id: str
+    status_options: list[dict]
+
+
 class Workflow(ABC):
     """Base workflow with pushdown automaton state management.
 
@@ -23,6 +32,7 @@ class Workflow(ABC):
 
     root: Path
     state_path: Path
+    _project_info: ProjectInfo | None = None  # lazily populated by _ensure_project_info
 
     # --- State (pushdown automaton with history) ---
     #
@@ -290,9 +300,10 @@ class Workflow(ABC):
         issue_id = data["repository"]["issue"]["id"]
 
         # Add to project
+        assert self._project_info is not None  # _ensure_project_info must have run
         data = self._gql(
             f'mutation {{ addProjectV2ItemById(input: {{ '
-            f'projectId: "{self._project_id}", contentId: "{issue_id}" }}) '
+            f'projectId: "{self._project_info.project_id}", contentId: "{issue_id}" }}) '
             f"{{ item {{ id }} }} }}",
             env,
         )
@@ -301,24 +312,25 @@ class Workflow(ABC):
     def _set_item_status(self, item_id: str, status_name: str,
                          env: dict) -> None:
         """Set a project item's status field."""
-        option_id = self._find_status_option(self._status_options, status_name)
+        assert self._project_info is not None  # _ensure_project_info must have run
+        option_id = self._find_status_option(self._project_info.status_options, status_name)
         self._gql(
             f'mutation {{ updateProjectV2ItemFieldValue(input: {{ '
-            f'projectId: "{self._project_id}", itemId: "{item_id}", '
-            f'fieldId: "{self._status_field_id}", '
+            f'projectId: "{self._project_info.project_id}", itemId: "{item_id}", '
+            f'fieldId: "{self._project_info.status_field_id}", '
             f'value: {{ singleSelectOptionId: "{option_id}" }} }}) '
             f"{{ projectV2Item {{ id }} }} }}",
             env,
         )
 
     def _ensure_project_info(self) -> dict:
-        """Load and cache project info (project_id, field_id, options)."""
-        if not hasattr(self, "_project_id"):
+        """Load and cache project info; return env dict for project API calls."""
+        if self._project_info is None:
             org = self._get_env("GH_PROJECT_ORG")
             number = self._get_env("GH_PROJECT_NUMBER")
             env = self._gh_env("GH_PROJECT_TOKEN")
-            self._project_id, self._status_field_id, self._status_options = \
-                self._get_project_status_field(org, number, env)
+            project_id, field_id, options = self._get_project_status_field(org, number, env)
+            self._project_info = ProjectInfo(project_id, field_id, options)
         return self._gh_env("GH_PROJECT_TOKEN")
 
     def _find_project_item(self, issue_url: str, env: dict) -> str:
