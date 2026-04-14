@@ -317,6 +317,22 @@ class StateTransitionTest(TestFixture):
 
     @patch.object(WorkflowDev, "close_issue")
     @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_does_not_transition_when_role_in_progress(self, mock_blockers, mock_close):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.start_review()
+        # user done; architect still reviewing (open, empty body)
+        mock_blockers.return_value = [
+            self._blocker("user", "closed"),
+            self._blocker("architect", "open"),
+        ]
+        wd.finish_review_approve("https://github.com/test/repo/issues/99")
+        self.assertEqual(wd.read_state()["phase"], "review")
+
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "all_blockers")
     def test_finish_review_does_not_transition_when_not_in_review(self, mock_blockers, mock_close):
         wd = self._make_wd()
         wd.begin_task("1")

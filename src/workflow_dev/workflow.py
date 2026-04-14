@@ -480,26 +480,6 @@ class WorkflowDev(Workflow):
         """Label used to mark a review issue with its reviewer role."""
         return f"reviewer:{role}"
 
-    def _review_status(self) -> dict[str, str]:
-        """Return per-role review status by querying GH blockers.
-
-        Status values:
-          'missing' — no review issue exists for this role
-          'pending' — review issue exists and is open (review in progress or feedback unaddressed)
-          'done'    — review issue exists and is closed (approved or feedback addressed)
-        """
-        task_url = self._issue_url_from_state()
-        if not task_url:
-            return {role: "missing" for role in self.REVIEW_ROLES}
-        blockers = self.all_blockers(task_url)
-        status = {role: "missing" for role in self.REVIEW_ROLES}
-        for blocker in blockers:
-            for role in self.REVIEW_ROLES:
-                if self._reviewer_label(role) in blocker.get("labels", []):
-                    status[role] = "done" if blocker.get("state") == "closed" else "pending"
-                    break
-        return status
-
     def _create_review_issue(self, role: str) -> str:
         """Create a review issue for the active task and link as blocker. Returns issue URL."""
         if role not in self.REVIEW_ROLES:
@@ -527,16 +507,40 @@ class WorkflowDev(Workflow):
         self._maybe_transition_after_review()
 
     def _maybe_transition_after_review(self) -> None:
-        """If parent is in REVIEW and all reviewers have responded, transition parent state.
+        """Transition parent state once every reviewer has given a verdict.
 
-        All roles done (closed) → APPROVED.
-        All roles non-missing but some pending (open feedback) → REFACTORING.
-        Any role still missing → no transition.
+        Called after each finish-review/* action. Classifies each role's review
+        issue from GH state:
+          'missing'     — no issue exists for this role (shouldn't occur after start-review)
+          'in_progress' — issue open, empty body (reviewer still working)
+          'feedback'    — issue open, body contains findings (reviewer done, findings outstanding)
+          'done'        — issue closed (approved or feedback addressed)
+
+        Transition only when every role is in {feedback, done} — i.e. all reviewers
+        have given a verdict. Until then, keep REVIEW.
+
+        Guard: only fires from REVIEW phase. Subsequent calls (e.g. a later reviewer
+        response after parent has already transitioned) are no-ops.
         """
         if self._read_phase() != Phase.REVIEW:
             return
-        status = self._review_status()
-        if any(s == "missing" for s in status.values()):
+        task_url = self._issue_url_from_state()
+        if not task_url:
+            return
+        blockers = self.all_blockers(task_url)
+        status = {role: "missing" for role in self.REVIEW_ROLES}
+        for blocker in blockers:
+            for role in self.REVIEW_ROLES:
+                if self._reviewer_label(role) in blocker.get("labels", []):
+                    if blocker.get("state") == "closed":
+                        status[role] = "done"
+                    elif blocker.get("body", "").strip():
+                        status[role] = "feedback"
+                    else:
+                        status[role] = "in_progress"
+                    break
+        # Wait until every reviewer has given a verdict.
+        if any(s in ("missing", "in_progress") for s in status.values()):
             return
         state = self.read_state()
         if all(s == "done" for s in status.values()):
