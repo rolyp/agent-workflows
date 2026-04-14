@@ -27,6 +27,9 @@ class Phase(Enum):
     IDLE = "idle"
     REFACTORING = "refactoring"
     MODIFYING = "modifying"
+    # REVIEW is a local cache of "review cycle in progress" on GH (any reviewer:*
+    # labeled blocker still in_progress). Set by start_review, cleared by
+    # _maybe_transition_after_review. Avoids a GH round-trip on every edit check.
     REVIEW = "review"
     APPROVED = "approved"
 
