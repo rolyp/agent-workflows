@@ -152,9 +152,6 @@ class PaperAuthoring(Workflow):
     def _phase_enum(self) -> type[Phase]:
         return Phase
 
-    # Fields carried forward from the previous frame unless overridden
-    _CARRY_FORWARD = ("regions", "description", "note_link", "plan_link", "subtasks", "issue_url")
-
     @staticmethod
     def _normalize_regions(regions: object) -> list[list[str]]:
         """Convert regions to list-of-lists format for JSON serialization."""
@@ -162,13 +159,9 @@ class PaperAuthoring(Workflow):
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
-        """Replace top frame, carrying forward paper-authoring-specific fields."""
-        prev = self.read_state()
+        """Replace top frame, normalizing regions if provided."""
         if "regions" in extra and extra["regions"] is not None:
             extra["regions"] = self._normalize_regions(extra["regions"])
-        for key in self._CARRY_FORWARD:
-            if key not in extra and key in prev:
-                extra[key] = prev[key]
         super()._write_state(phase, task, **extra)
 
     def _push_state(self, phase: Enum, task: str | None = None,
