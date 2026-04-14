@@ -50,7 +50,6 @@ CMD_REQUEST_REVIEW = "request-review"
 CMD_SUBMIT_REVIEW = "submit-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
-CMD_START_REVIEW = "start-review"
 CMD_FINISH_REVIEW_APPROVE = "finish-review/approve"
 CMD_FINISH_REVIEW_FEEDBACK = "finish-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
@@ -465,7 +464,7 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         self._write_state(Phase.REVIEW, state.get("task"))
         self._set_label(self.LABEL_REVIEW)
-        return {role: self.start_review(role) for role in self.REVIEW_ROLES}
+        return {role: self._create_review_issue(role) for role in self.REVIEW_ROLES}
 
     REVIEW_ROLES = ("user", "architect")
 
@@ -493,13 +492,13 @@ class WorkflowDev(Workflow):
                     break
         return status
 
-    def start_review(self, role: str) -> str:
-        """Reviewer-facing: create a review issue for the active task. Returns issue URL."""
+    def _create_review_issue(self, role: str) -> str:
+        """Create a review issue for the active task and link as blocker. Returns issue URL."""
         if role not in self.REVIEW_ROLES:
             raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
         task_url = self._issue_url_from_state()
         if not task_url:
-            raise ValueError("No active task; cannot start review.")
+            raise ValueError("No active task; cannot create review issue.")
         task_number = task_url.rsplit("/", 1)[-1]
         title = f"{role} review of #{task_number}"
         review_url = self.create_issue(title, "")
@@ -947,13 +946,6 @@ def main() -> None:
             sys.exit(1)
         wd.submit_review(args[0], args[1])
         print(f"Review submitted: {args[0]} (#{args[1]} added as blocker)")
-    elif command == CMD_START_REVIEW:
-        args = sys.argv[2:]
-        if len(args) < 1:
-            print(f"Usage: workflow.py {CMD_START_REVIEW} <user|architect>", file=sys.stderr)
-            sys.exit(1)
-        url = wd.start_review(args[0])
-        print(url)
     elif command == CMD_FINISH_REVIEW_APPROVE:
         args = sys.argv[2:]
         if len(args) < 1:
