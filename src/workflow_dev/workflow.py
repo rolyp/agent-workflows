@@ -119,9 +119,17 @@ class WorkflowDev(Workflow):
         "bash test/test.sh",
     )
 
+    # Regex patterns for read-only commands needing more precision than prefix match.
+    _BASH_REGEX = (
+        r'^gh api repos/[^/]+/[^/]+/issues/\d+/dependencies/blocked_by(\s|$)',
+    )
+
     def _is_whitelisted(self, command: str) -> bool:
         for prefix in self._BASH_READ_ONLY + self._BASH_WORKFLOW:
             if command.startswith(prefix):
+                return True
+        for pattern in self._BASH_REGEX:
+            if re.match(pattern, command):
                 return True
         return False
 
