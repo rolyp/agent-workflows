@@ -505,12 +505,36 @@ class WorkflowDev(Workflow):
     def finish_review_approve(self, review_url: str) -> None:
         """Reviewer-facing: close a review issue with no findings."""
         self.close_issue(review_url)
+        self._maybe_transition_after_review()
 
     def finish_review_feedback(self, review_url: str, findings: str) -> None:
         """Reviewer-facing: record findings on a review issue; leave open until addressed."""
         if not findings.strip():
             raise ValueError("Feedback requires non-empty findings text.")
         self._write_issue_body(review_url, findings)
+        self._maybe_transition_after_review()
+
+    def _maybe_transition_after_review(self) -> None:
+        """If parent is in REVIEW and all reviewers have responded, transition parent state.
+
+        All roles done (closed) → APPROVED.
+        All roles non-missing but some pending (open feedback) → REFACTORING.
+        Any role still missing → no transition.
+        """
+        if self._read_phase() != Phase.REVIEW:
+            return
+        status = self._review_status()
+        if any(s == "missing" for s in status.values()):
+            return
+        state = self.read_state()
+        if all(s == "done" for s in status.values()):
+            self._write_state(Phase.APPROVED, state.get("task"))
+            self._set_label(self.LABEL_IDLE)
+            self._commit_state("state: approved (auto from review)")
+        else:
+            self._write_state(Phase.REFACTORING, state.get("task"))
+            self._set_label(self.LABEL_IDLE)
+            self._commit_state("state: refactoring (auto from review)")
 
     def submit_review(self, role: str, review_issue_number: str) -> None:
         """Submit a review by linking a review issue as a blocker."""
