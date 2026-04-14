@@ -37,6 +37,13 @@ class StepMode(Enum):
     MODIFY = "modify"
 
 
+class ReviewStatus(Enum):
+    """Legal states for a reviewer's response in an active review cycle."""
+    IN_PROGRESS = "in_progress"  # issue open, empty body — reviewer still working
+    FEEDBACK = "feedback"        # issue open, body contains findings — reviewer done, findings outstanding
+    DONE = "done"                # issue closed — approved or feedback addressed
+
+
 # CLI command names
 CMD_STARTUP = "startup"
 CMD_BEGIN_TASK = "begin-task"
@@ -510,17 +517,14 @@ class WorkflowDev(Workflow):
         """Transition parent state once every reviewer has given a verdict.
 
         Called after each finish-review/* action. Classifies each role's review
-        issue from GH state:
-          'missing'     — no issue exists for this role (shouldn't occur after start-review)
-          'in_progress' — issue open, empty body (reviewer still working)
-          'feedback'    — issue open, body contains findings (reviewer done, findings outstanding)
-          'done'        — issue closed (approved or feedback addressed)
+        issue (ReviewStatus). Transitions only when every role is FEEDBACK or
+        DONE — i.e. all reviewers have given a verdict. Until then, keep REVIEW.
 
-        Transition only when every role is in {feedback, done} — i.e. all reviewers
-        have given a verdict. Until then, keep REVIEW.
+        Guard: only fires from REVIEW phase. Subsequent calls (e.g. a later
+        reviewer response after parent has already transitioned) are no-ops.
 
-        Guard: only fires from REVIEW phase. Subsequent calls (e.g. a later reviewer
-        response after parent has already transitioned) are no-ops.
+        Raises RuntimeError if any role has no matching blocker — a corruption
+        of the invariant that start-review creates one labeled blocker per role.
         """
         if self._read_phase() != Phase.REVIEW:
             return
@@ -528,22 +532,27 @@ class WorkflowDev(Workflow):
         if not task_url:
             return
         blockers = self.all_blockers(task_url)
-        status = {role: "missing" for role in self.REVIEW_ROLES}
-        for blocker in blockers:
-            for role in self.REVIEW_ROLES:
-                if self._reviewer_label(role) in blocker.get("labels", []):
-                    if blocker.get("state") == "closed":
-                        status[role] = "done"
-                    elif blocker.get("body", "").strip():
-                        status[role] = "feedback"
-                    else:
-                        status[role] = "in_progress"
-                    break
+        status: dict[str, ReviewStatus] = {}
+        for role in self.REVIEW_ROLES:
+            matching = [b for b in blockers if self._reviewer_label(role) in b.get("labels", [])]
+            if not matching:
+                raise RuntimeError(
+                    f"Review cycle corrupt: no blocker with label "
+                    f"'{self._reviewer_label(role)}' on {task_url}. "
+                    f"Expected start-review to have created one."
+                )
+            blocker = matching[0]
+            if blocker.get("state") == "closed":
+                status[role] = ReviewStatus.DONE
+            elif blocker.get("body", "").strip():
+                status[role] = ReviewStatus.FEEDBACK
+            else:
+                status[role] = ReviewStatus.IN_PROGRESS
         # Wait until every reviewer has given a verdict.
-        if any(s in ("missing", "in_progress") for s in status.values()):
+        if any(s is ReviewStatus.IN_PROGRESS for s in status.values()):
             return
         state = self.read_state()
-        if all(s == "done" for s in status.values()):
+        if all(s is ReviewStatus.DONE for s in status.values()):
             self._write_state(Phase.APPROVED, state.get("task"))
             self._set_label(self.LABEL_IDLE)
             self._commit_state("state: approved (auto from review)")

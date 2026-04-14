@@ -304,16 +304,17 @@ class StateTransitionTest(TestFixture):
 
     @patch.object(WorkflowDev, "close_issue")
     @patch.object(WorkflowDev, "all_blockers")
-    def test_finish_review_does_not_transition_when_role_missing(self, mock_blockers, mock_close):
+    def test_finish_review_raises_when_role_has_no_blocker(self, mock_blockers, mock_close):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
         wd.start_review()
-        # user done; architect has no blocker (missing)
+        # user has a blocker; architect has none — corruption of start-review invariant
         mock_blockers.return_value = [self._blocker("user", "closed")]
-        wd.finish_review_approve("https://github.com/test/repo/issues/99")
-        self.assertEqual(wd.read_state()["phase"], "review")
+        with self.assertRaises(RuntimeError) as ctx:
+            wd.finish_review_approve("https://github.com/test/repo/issues/99")
+        self.assertIn("reviewer:architect", str(ctx.exception))
 
     @patch.object(WorkflowDev, "close_issue")
     @patch.object(WorkflowDev, "all_blockers")
