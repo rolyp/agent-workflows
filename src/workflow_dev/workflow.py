@@ -536,18 +536,17 @@ class WorkflowDev(Workflow):
                 status[role] = ReviewStatus.FEEDBACK
             else:
                 status[role] = ReviewStatus.IN_PROGRESS
-        # Wait until every reviewer has given a verdict.
-        if any(s is ReviewStatus.IN_PROGRESS for s in status.values()):
-            return
-        state = self.read_state()
-        if all(s is ReviewStatus.DONE for s in status.values()):
-            self._write_state(Phase.APPROVED, state.get("task"))
-            self._set_label(self.LABEL_IDLE)
-            self._commit_state("state: approved (auto from review)")
-        else:
-            self._write_state(Phase.REFACTORING, state.get("task"))
-            self._set_label(self.LABEL_IDLE)
-            self._commit_state("state: refactoring (auto from review)")
+        # Transition only when every reviewer has given a verdict.
+        if all(s is not ReviewStatus.IN_PROGRESS for s in status.values()):
+            state = self.read_state()
+            if all(s is ReviewStatus.DONE for s in status.values()):
+                self._write_state(Phase.APPROVED, state.get("task"))
+                self._set_label(self.LABEL_IDLE)
+                self._commit_state("state: approved (auto from review)")
+            else:
+                self._write_state(Phase.REFACTORING, state.get("task"))
+                self._set_label(self.LABEL_IDLE)
+                self._commit_state("state: refactoring (auto from review)")
 
     def submit_review(self, role: str, review_issue_number: str) -> None:
         """Submit a review by linking a review issue as a blocker."""
