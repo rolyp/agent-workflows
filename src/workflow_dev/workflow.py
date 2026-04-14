@@ -514,22 +514,11 @@ class WorkflowDev(Workflow):
         self._maybe_transition_after_review()
 
     def _maybe_transition_after_review(self) -> None:
-        """Transition parent state once every reviewer has given a verdict.
-
-        Called after each finish-review/* action. Classifies each role's review
-        issue (ReviewStatus). Transitions only when every role is FEEDBACK or
-        DONE — i.e. all reviewers have given a verdict. Until then, keep REVIEW.
-
-        Guard: only fires from REVIEW phase. Subsequent calls (e.g. a later
-        reviewer response after parent has already transitioned) are no-ops.
-
-        Raises RuntimeError if any role has no matching blocker — a corruption
-        of the invariant that start-review creates one labeled blocker per role.
-        """
+        """Transition parent state once every reviewer has given a verdict."""
         if self._read_phase() != Phase.REVIEW:
             return
         task_url = self._issue_url_from_state()
-        assert task_url, "invariant: REVIEW phase implies active task with issue_url"
+        assert task_url
         blockers = self.all_blockers(task_url)
         status: dict[str, ReviewStatus] = {}
         for role in self.REVIEW_ROLES:
