@@ -240,6 +240,65 @@ class StateTransitionTest(TestFixture):
             wd.approve()
         self.assertIn("missing reviews", str(ctx.exception))
 
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "_review_status")
+    def test_finish_review_approve_transitions_to_approved_when_all_done(self, mock_status, mock_close):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.request_review()
+        mock_status.return_value = {"user": "done", "architect": "done"}
+        wd.finish_review_approve("https://github.com/test/repo/issues/99")
+        self.assertEqual(wd.read_state()["phase"], "approved")
+        mock_close.assert_called_once_with("https://github.com/test/repo/issues/99")
+
+    @patch.object(WorkflowDev, "_write_issue_body")
+    @patch.object(WorkflowDev, "_review_status")
+    def test_finish_review_feedback_transitions_to_refactoring_when_no_missing(self, mock_status, mock_write):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.request_review()
+        mock_status.return_value = {"user": "pending", "architect": "done"}
+        wd.finish_review_feedback("https://github.com/test/repo/issues/99", "Findings here")
+        self.assertEqual(wd.read_state()["phase"], "refactoring")
+        mock_write.assert_called_once()
+
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "_review_status")
+    def test_finish_review_does_not_transition_when_role_missing(self, mock_status, mock_close):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.request_review()
+        mock_status.return_value = {"user": "done", "architect": "missing"}
+        wd.finish_review_approve("https://github.com/test/repo/issues/99")
+        self.assertEqual(wd.read_state()["phase"], "review")
+
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "_review_status")
+    def test_finish_review_does_not_transition_when_not_in_review(self, mock_status, mock_close):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        # Parent stays in refactoring (no request-review)
+        mock_status.return_value = {"user": "done", "architect": "done"}
+        wd.finish_review_approve("https://github.com/test/repo/issues/99")
+        self.assertEqual(wd.read_state()["phase"], "refactoring")
+
+    def test_finish_review_feedback_rejects_empty_findings(self):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.request_review()
+        with self.assertRaises(ValueError):
+            wd.finish_review_feedback("https://github.com/test/repo/issues/99", "  ")
+
     def test_end_task_after_review(self):
         wd = self._make_wd()
         wd.begin_task("1")
