@@ -394,15 +394,9 @@ class WorkflowDev(Workflow):
         self._append_history(entry)
         self._render_issue_todos()
 
-    def _render_issue_todos(self) -> None:
-        """Re-render the issue body's todo section from history + stack."""
-        issue_url = self._issue_url_from_state()
-        if not issue_url:
-            return
-        sf = self._read_state_file()
-        repo = self.get_repo()
+    def _render_steps_markdown(self, sf: dict, repo: str) -> str:
+        """Render the Steps section as markdown from the state file + repo."""
         lines = []
-        # Render history
         for entry in sf["history"]:
             step = entry["step"]
             status = entry["status"]
@@ -420,26 +414,28 @@ class WorkflowDev(Workflow):
                     lines.append(f'- [x] \u26d4 {step} ([aborted](## "{reason}"))')
                 else:
                     lines.append(f"- [x] \u26d4 {step} (aborted)")
-        # Render active step from stack (if any)
         for frame in sf["stack"][1:]:  # skip root frame
             step = frame.get("step")
             mode = frame.get("mode", "")
             if step:
                 emoji = self.MODE_EMOJI.get(mode, "\u26aa")
                 lines.append(f"- [ ] {emoji} {step}")
-        # Read existing body, find the steps section, replace it
-        body = self._read_issue_body(issue_url)
+        return "\n".join(lines)
+
+    def _render_issue_todos(self) -> None:
+        """Re-render the issue body's Steps section from history + stack."""
+        issue_url = self._issue_url_from_state()
+        if not issue_url:
+            return
+        steps_md = self._render_steps_markdown(self._read_state_file(), self.get_repo())
         section_start = "## Steps"
         section_end = "---"
-        rendered_section = f"{section_start}\n\n" + "\n".join(lines) + f"\n\n{section_end}"
+        rendered_section = f"{section_start}\n\n{steps_md}\n\n{section_end}"
+        body = self._read_issue_body(issue_url)
         if section_start in body:
-            # Replace existing section (from heading to next ---)
             start_idx = body.index(section_start)
             end_idx = body.find(section_end, start_idx + len(section_start))
-            if end_idx != -1:
-                end_idx += len(section_end)
-            else:
-                end_idx = len(body)
+            end_idx = end_idx + len(section_end) if end_idx != -1 else len(body)
             body = body[:start_idx] + rendered_section + body[end_idx:]
         else:
             body = body.rstrip() + f"\n\n{rendered_section}\n"
