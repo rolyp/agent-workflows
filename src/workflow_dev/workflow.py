@@ -100,9 +100,6 @@ class WorkflowDev(Workflow):
         LABEL_MODIFY, LABEL_REVIEW,
     )
 
-    # Fields carried forward from previous frame unless overridden
-    _CARRY_FORWARD = ("issue_url",)
-
     # Bash whitelist: commands always permitted in protocol mode
     _BASH_READ_ONLY = (
         "git log", "git status", "git diff", "git show",
@@ -142,11 +139,11 @@ class WorkflowDev(Workflow):
 
     def _write_state(self, phase: Enum, task: str | None = None,
                      **extra: object) -> None:
-        """Replace top frame, carrying forward issue_url."""
-        prev = self.read_state()
-        for key in self._CARRY_FORWARD:
-            if key not in extra and key in prev:
-                extra[key] = prev[key]
+        """Replace top frame. issue_url carries forward unless explicitly overridden."""
+        if "issue_url" not in extra:
+            issue_url = self.read_state().get("issue_url")
+            if issue_url is not None:
+                extra["issue_url"] = issue_url
         super()._write_state(phase, task, **extra)
 
     def _commit_state(self, message: str) -> None:
