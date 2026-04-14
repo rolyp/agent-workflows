@@ -54,9 +54,6 @@ CMD_BEGIN_MODIFY = "begin-modify"
 CMD_END_STEP = "end-step"
 CMD_ABORT_STEP = "abort-step"
 CMD_START_REVIEW = "start-review"
-CMD_SUBMIT_REVIEW = "submit-review"
-CMD_RESPOND_APPROVE = "respond-review/approve"
-CMD_RESPOND_FEEDBACK = "respond-review/feedback"
 CMD_FINISH_REVIEW_APPROVE = "finish-review/approve"
 CMD_FINISH_REVIEW_FEEDBACK = "finish-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
@@ -548,66 +545,6 @@ class WorkflowDev(Workflow):
                 self._set_label(self.LABEL_IDLE)
                 self._commit_state("state: refactoring (auto from review)")
 
-    def submit_review(self, role: str, review_issue_number: str) -> None:
-        """Submit a review by linking a review issue as a blocker."""
-        if role not in self.REVIEW_ROLES:
-            raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
-        self._require_phase(Phase.REVIEW, "submit-review")
-        task_url = self._issue_url_from_state()
-        if not task_url:
-            raise ValueError("No issue URL in state")
-        repo = self.get_repo()
-        review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
-        self.add_blocker(task_url, review_url)
-        # Record in state
-        sf = self._read_state_file()
-        reviews = sf["stack"][-1].get("reviews_submitted", [])
-        if role not in reviews:
-            reviews.append(role)
-        sf["stack"][-1]["reviews_submitted"] = reviews
-        self._save_stack(sf["stack"], history=sf["history"])
-
-    def _missing_reviews(self) -> list[str]:
-        """Return list of review roles not yet submitted."""
-        state = self.read_state()
-        submitted = state.get("reviews_submitted", [])
-        return [r for r in self.REVIEW_ROLES if r not in submitted]
-
-    def _complete_review(self, command: str, target_phase: Phase = Phase.REFACTORING) -> None:
-        """Shared logic for approve/feedback: validate phase, check reviews, transition."""
-        self._require_phase(Phase.REVIEW, command)
-        missing = self._missing_reviews()
-        if missing:
-            raise ValueError(
-                f"Cannot {command}: missing reviews from {', '.join(missing)}. "
-                f"Use `submit-review <role> <content>` first."
-            )
-        state = self.read_state()
-        self._write_state(target_phase, state.get("task"))
-        self._set_label(self.LABEL_IDLE)
-
-    def approve(self) -> None:
-        """Approve review; transition to approved. Requires both reviews submitted."""
-        self._complete_review("respond-review/approve", Phase.APPROVED)
-        self._commit_state("state: approved")
-
-    def feedback(self, items: list[str] | None = None) -> None:
-        """Review feedback; return to idle. Requires reviews to have been submitted."""
-        self._complete_review("respond-review/feedback")
-        if items:
-            issue_url = self._issue_url_from_state()
-            if issue_url:
-                # Insert feedback todos ABOVE the Steps section
-                body = self._read_issue_body(issue_url)
-                new_items = "\n".join(f"- [ ] {item}" for item in items)
-                section = "## Steps"
-                if section in body:
-                    idx = body.index(section)
-                    body = body[:idx] + new_items + "\n\n" + body[idx:]
-                else:
-                    body = f"{body}\n{new_items}" if body else new_items
-                self._write_issue_body(issue_url, body)
-
     def end_task(self) -> None:
         """Complete the current task. Requires approved review."""
         self._require_phase(Phase.APPROVED, "end-task")
@@ -957,26 +894,9 @@ def main() -> None:
         print("Review requested; edits blocked. Spawn each reviewer with their URL:")
         for role, url in urls.items():
             print(f"  {role}: {url}")
-    elif command == CMD_RESPOND_APPROVE:
-        wd.approve()
-        print("Review approved; back to idle")
-    elif command == CMD_RESPOND_FEEDBACK:
-        items = sys.argv[2:] if len(sys.argv) > 2 else None
-        wd.feedback(items)
-        msg = "Review feedback; back to idle"
-        if items:
-            msg += f" · {len(items)} todo(s) added to issue"
-        print(msg)
     elif command == CMD_END_TASK:
         wd.end_task()
         print("Task complete; issue closed")
-    elif command == CMD_SUBMIT_REVIEW:
-        args = sys.argv[2:]
-        if len(args) < 2:
-            print(f"Usage: workflow.py {CMD_SUBMIT_REVIEW} <user|architect> <review-issue-number>", file=sys.stderr)
-            sys.exit(1)
-        wd.submit_review(args[0], args[1])
-        print(f"Review submitted: {args[0]} (#{args[1]} added as blocker)")
     elif command == CMD_FINISH_REVIEW_APPROVE:
         args = sys.argv[2:]
         if len(args) < 1:
