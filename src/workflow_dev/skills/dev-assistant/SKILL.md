@@ -42,4 +42,4 @@ Post-push hook automatically records the CI run ID. `start-review` will block un
 ## Working with other skills
 
 - **Tester**: invoke for writing new tests or diagnosing test failures. For quick test runs, invoke inline
-- **User Reviewer** + **Architect Reviewer**: both invoked as parallel subagents at `start-review`. They run in separate context (fresh perspective). Collate their findings and present to Developer for `respond-review/approve` or `respond-review/feedback`
+- **User Reviewer** + **Architect Reviewer**: `start-review` pre-creates one review issue per role and returns a `{role: url}` mapping. Spawn each reviewer as a subagent, passing their review issue URL in the prompt. Each reviewer calls `finish-review/approve` or `finish-review/feedback` on their own issue; the parent auto-transitions once all reviewers have given a verdict. The `finish-review/*` commands are whitelisted only for reviewer subagents — you cannot call them yourself.
