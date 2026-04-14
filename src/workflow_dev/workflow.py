@@ -535,56 +535,58 @@ class WorkflowDev(Workflow):
     def end_task(self) -> None:
         """Complete the current task. Requires approved review."""
         self._require_phase(Phase.APPROVED, "end-task")
-
-        # Merge branch to main (skip if already on main or no remote)
-        branch = subprocess.run(
-            ["git", "branch", "--show-current"],
-            capture_output=True, text=True, cwd=self.root,
-        ).stdout.strip()
-        if branch and branch != "main":
-            result = subprocess.run(
-                ["git", "checkout", "main"],
-                capture_output=True, text=True, cwd=self.root,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(f"Failed to checkout main: {result.stderr}")
-            result = subprocess.run(
-                ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
-                capture_output=True, text=True, cwd=self.root,
-            )
-            if result.returncode != 0:
-                subprocess.run(
-                    ["git", "checkout", branch],
-                    capture_output=True, cwd=self.root,
-                )
-                raise RuntimeError(f"Merge failed: {result.stderr}")
-            # Assert we're on main
-            current = subprocess.run(
-                ["git", "branch", "--show-current"],
-                capture_output=True, text=True, cwd=self.root,
-            ).stdout.strip()
-            if current != "main":
-                raise RuntimeError(f"Expected to be on main after merge, but on {current}")
-            # Push main if remote exists
-            has_remote = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                capture_output=True, text=True, cwd=self.root,
-            ).returncode == 0
-            if has_remote:
-                subprocess.run(
-                    ["git", "push", "origin", "main"],
-                    capture_output=True, text=True, cwd=self.root,
-                )
-            # Delete branch
-            subprocess.run(
-                ["git", "branch", "-d", branch],
-                capture_output=True, cwd=self.root,
-            )
-
+        self._merge_to_main()
         issue_url = self._issue_url_from_state()
         if issue_url:
             self.close_issue(issue_url)
         self._update_state(phase=Phase.IDLE, issue_url=None)
+
+    def _merge_to_main(self) -> None:
+        """Merge the current task branch to main, push, and delete the branch.
+
+        No-op if already on main or on a detached HEAD.
+        """
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True, text=True, cwd=self.root,
+        ).stdout.strip()
+        if not branch or branch == "main":
+            return
+        result = subprocess.run(
+            ["git", "checkout", "main"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to checkout main: {result.stderr}")
+        result = subprocess.run(
+            ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
+            capture_output=True, text=True, cwd=self.root,
+        )
+        if result.returncode != 0:
+            subprocess.run(
+                ["git", "checkout", branch],
+                capture_output=True, cwd=self.root,
+            )
+            raise RuntimeError(f"Merge failed: {result.stderr}")
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True, text=True, cwd=self.root,
+        ).stdout.strip()
+        if current != "main":
+            raise RuntimeError(f"Expected to be on main after merge, but on {current}")
+        has_remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=self.root,
+        ).returncode == 0
+        if has_remote:
+            subprocess.run(
+                ["git", "push", "origin", "main"],
+                capture_output=True, text=True, cwd=self.root,
+            )
+        subprocess.run(
+            ["git", "branch", "-d", branch],
+            capture_output=True, cwd=self.root,
+        )
 
     def suspend_task(self) -> None:
         """Park the current task. Switches to main, sets issue to Paused."""
