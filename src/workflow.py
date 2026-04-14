@@ -65,6 +65,17 @@ class Workflow(ABC):
         sf["stack"][-1] = frame
         self._save_stack(sf["stack"], history=sf["history"])
 
+    def _update_state(self, **changes: object) -> None:
+        """Merge changes into the top frame, preserving fields not mentioned.
+
+        Enum values are auto-unwrapped to their .value. Use this for phase
+        transitions where most fields carry forward unchanged.
+        """
+        sf = self._read_state_file()
+        for key, value in changes.items():
+            sf["stack"][-1][key] = value.value if isinstance(value, Enum) else value
+        self._save_stack(sf["stack"], history=sf["history"])
+
     def _push_state(self, phase: Enum, task: str | None = None,
                     **extra: object) -> None:
         """Push a new frame onto the state stack."""
