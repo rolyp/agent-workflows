@@ -9,8 +9,8 @@ Follow whenever working on the agent-workflows submodule. See [GitHub Issues](ht
 | **Developer** | — | — | Human; reviews, approves, directs |
 | **Dev Assistant** | [`dev-assistant`](skills/dev-assistant/SKILL.md) (background) | Always active | Drives implementation; orchestrates other skills |
 | **Tester** | [`/tester`](skills/tester/SKILL.md) | Inline or subagent | Runs and writes tests for workflow code |
-| **User Reviewer** | [`user-review`](skills/user-review/SKILL.md) | Subagent at `request-review` | Expert user; reviews for workflow robustness, transparency, fitness for purpose |
-| **Architect Reviewer** | [`architect-review`](skills/architect-review/SKILL.md) | Subagent at `request-review` | Expert architect; reviews for design integrity, clear responsibilities, invariant enforcement |
+| **User Reviewer** | [`user-reviewer`](../../.claude/agents/user-reviewer.md) | Subagent at `request-review` | Expert user; reviews for workflow robustness, transparency, fitness for purpose |
+| **Architect Reviewer** | [`architect-reviewer`](../../.claude/agents/architect-reviewer.md) | Subagent at `request-review` | Expert architect; reviews for design integrity, clear responsibilities, invariant enforcement |
 
 Both reviewers run as subagents in **separate context** (fresh perspective, no shared development biases). Invoked in parallel at `request-review`.
 
