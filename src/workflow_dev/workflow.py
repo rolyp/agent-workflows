@@ -81,6 +81,8 @@ def _is_test_file(path: str) -> bool:
 
 class WorkflowDev(Workflow):
     def __init__(self, project_root: Path):
+        if not project_root.is_dir():
+            raise FileNotFoundError(f"project_root is not a directory: {project_root}")
         self.root = project_root
         self.state_path = project_root / "state.json"
         self._init_state(Phase.IDLE)
