@@ -50,6 +50,9 @@ CMD_REQUEST_REVIEW = "request-review"
 CMD_SUBMIT_REVIEW = "submit-review"
 CMD_RESPOND_APPROVE = "respond-review/approve"
 CMD_RESPOND_FEEDBACK = "respond-review/feedback"
+CMD_START_REVIEW = "start-review"
+CMD_FINISH_REVIEW_APPROVE = "finish-review/approve"
+CMD_FINISH_REVIEW_FEEDBACK = "finish-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
 CMD_REOPEN_ISSUE = "reopen-issue"
 CMD_ADD_TO_PROJECT = "add-to-project"
@@ -485,6 +488,30 @@ class WorkflowDev(Workflow):
                     break
         return status
 
+    def start_review(self, role: str) -> str:
+        """Reviewer-facing: create a review issue for the active task. Returns issue URL."""
+        if role not in self.REVIEW_ROLES:
+            raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
+        task_url = self._issue_url_from_state()
+        if not task_url:
+            raise ValueError("No active task; cannot start review.")
+        task_number = task_url.rsplit("/", 1)[-1]
+        title = f"{role} review of #{task_number}"
+        review_url = self.create_issue(title, "")
+        self.add_label(review_url, self._reviewer_label(role))
+        self.add_blocker(task_url, review_url)
+        return review_url
+
+    def finish_review_approve(self, review_url: str) -> None:
+        """Reviewer-facing: close a review issue with no findings."""
+        self.close_issue(review_url)
+
+    def finish_review_feedback(self, review_url: str, findings: str) -> None:
+        """Reviewer-facing: record findings on a review issue; leave open until addressed."""
+        if not findings.strip():
+            raise ValueError("Feedback requires non-empty findings text.")
+        self._write_issue_body(review_url, findings)
+
     def submit_review(self, role: str, review_issue_number: str) -> None:
         """Submit a review by linking a review issue as a blocker."""
         if role not in self.REVIEW_ROLES:
@@ -889,6 +916,27 @@ def main() -> None:
             sys.exit(1)
         wd.submit_review(args[0], args[1])
         print(f"Review submitted: {args[0]} (#{args[1]} added as blocker)")
+    elif command == CMD_START_REVIEW:
+        args = sys.argv[2:]
+        if len(args) < 1:
+            print(f"Usage: workflow.py {CMD_START_REVIEW} <user|architect>", file=sys.stderr)
+            sys.exit(1)
+        url = wd.start_review(args[0])
+        print(url)
+    elif command == CMD_FINISH_REVIEW_APPROVE:
+        args = sys.argv[2:]
+        if len(args) < 1:
+            print(f"Usage: workflow.py {CMD_FINISH_REVIEW_APPROVE} <review-url>", file=sys.stderr)
+            sys.exit(1)
+        wd.finish_review_approve(args[0])
+        print("Review approved (issue closed)")
+    elif command == CMD_FINISH_REVIEW_FEEDBACK:
+        args = sys.argv[2:]
+        if len(args) < 2:
+            print(f"Usage: workflow.py {CMD_FINISH_REVIEW_FEEDBACK} <review-url> <findings>", file=sys.stderr)
+            sys.exit(1)
+        wd.finish_review_feedback(args[0], args[1])
+        print("Feedback recorded; issue left open until findings addressed")
     elif command == CMD_CREATE_ISSUE:
         args = sys.argv[2:]
         if len(args) < 2:
