@@ -461,6 +461,30 @@ class WorkflowDev(Workflow):
 
     REVIEW_ROLES = ("user", "architect")
 
+    def _reviewer_label(self, role: str) -> str:
+        """Label used to mark a review issue with its reviewer role."""
+        return f"reviewer:{role}"
+
+    def _review_status(self) -> dict[str, str]:
+        """Return per-role review status by querying GH blockers.
+
+        Status values:
+          'missing' — no review issue exists for this role
+          'pending' — review issue exists and is open (review in progress or feedback unaddressed)
+          'done'    — review issue exists and is closed (approved or feedback addressed)
+        """
+        task_url = self._issue_url_from_state()
+        if not task_url:
+            return {role: "missing" for role in self.REVIEW_ROLES}
+        blockers = self.all_blockers(task_url)
+        status = {role: "missing" for role in self.REVIEW_ROLES}
+        for blocker in blockers:
+            for role in self.REVIEW_ROLES:
+                if self._reviewer_label(role) in blocker.get("labels", []):
+                    status[role] = "done" if blocker.get("state") == "closed" else "pending"
+                    break
+        return status
+
     def submit_review(self, role: str, review_issue_number: str) -> None:
         """Submit a review by linking a review issue as a blocker."""
         if role not in self.REVIEW_ROLES:
