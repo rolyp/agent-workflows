@@ -441,8 +441,12 @@ class WorkflowDev(Workflow):
             body = body.rstrip() + f"\n\n{rendered_section}\n"
         self._write_issue_body(issue_url, body)
 
-    def request_review(self) -> None:
-        """Request code review. Pushes branch, runs tests, checks CI."""
+    def request_review(self) -> dict[str, str]:
+        """Request code review. Pushes branch, runs tests, creates one review issue per role.
+
+        Returns a mapping {role: review_issue_url} so the caller (Dev Assistant)
+        can pass each URL to the corresponding reviewer subagent.
+        """
         self._require_task_idle("request-review")
         self._run_tests()
         # Push branch and check CI (skip if no remote)
@@ -461,6 +465,7 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         self._write_state(Phase.REVIEW, state.get("task"))
         self._set_label(self.LABEL_REVIEW)
+        return {role: self.start_review(role) for role in self.REVIEW_ROLES}
 
     REVIEW_ROLES = ("user", "architect")
 
@@ -918,8 +923,10 @@ def main() -> None:
         wd.abort_step(reason)
         print(f"Step aborted; back to idle" + (f" ({reason})" if reason else ""))
     elif command == CMD_REQUEST_REVIEW:
-        wd.request_review()
-        print("Review requested; edits blocked. Invoke /code-review now.")
+        urls = wd.request_review()
+        print("Review requested; edits blocked. Spawn each reviewer with their URL:")
+        for role, url in urls.items():
+            print(f"  {role}: {url}")
     elif command == CMD_RESPOND_APPROVE:
         wd.approve()
         print("Review approved; back to idle")
