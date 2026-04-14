@@ -27,6 +27,8 @@ class TestFixture(unittest.TestCase):
             patch.object(WorkflowDev, "close_issue"),
             patch.object(WorkflowDev, "open_blockers", return_value=[]),
             patch.object(WorkflowDev, "add_blocker"),
+            patch.object(WorkflowDev, "create_issue", return_value="https://github.com/test/repo/issues/99"),
+            patch.object(WorkflowDev, "add_label"),
             patch.object(WorkflowDev, "_render_issue_todos"),
         ]
         for p in self._patches:
@@ -152,102 +154,140 @@ class StateTransitionTest(TestFixture):
             wd.begin_modify("Add feature", rationale=[])
         self.assertIn("rationale", str(ctx.exception))
 
-    def test_request_review_only_from_idle(self):
+    def test_start_review_only_from_idle(self):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         with self.assertRaises(ValueError):
-            wd.request_review()
+            wd.start_review()
 
-    def _submit_mock_reviews(self, wd):
-        """Mark both reviews as submitted in state (without GitHub calls)."""
-        sf = wd._read_state_file()
-        sf["stack"][-1]["reviews_submitted"] = list(wd.REVIEW_ROLES)
-        wd._save_stack(sf["stack"], history=sf["history"])
-
-    def test_review_approve_returns_to_idle(self):
+    def test_start_review_returns_url_per_role(self):
         wd = self._make_wd()
         wd.begin_task("1")
-        wd.begin_refactor("Work", "test")
+        wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
-        self.assertEqual(wd.read_state()["phase"], "review")
-        self._submit_mock_reviews(wd)
-        wd.approve()
+        urls = wd.start_review()
+        self.assertEqual(set(urls.keys()), set(wd.REVIEW_ROLES))
+        for url in urls.values():
+            self.assertTrue(url.startswith("https://github.com/"))
+
+    def test_start_review_creates_issue_per_role(self):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.start_review()
+        # create_issue called once per role
+        self.assertEqual(wd.create_issue.call_count, len(wd.REVIEW_ROLES))
+        # add_label called once per role with the corresponding reviewer label
+        labels_added = {call.args[1] for call in wd.add_label.call_args_list}
+        expected_labels = {wd._reviewer_label(role) for role in wd.REVIEW_ROLES}
+        self.assertEqual(labels_added, expected_labels)
+
+    def _blocker(self, role: str, state: str, body: str = "") -> dict:
+        """Construct a blocker dict as all_blockers would return."""
+        return {"state": state, "body": body, "labels": [f"reviewer:{role}"]}
+
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_approve_transitions_to_approved_when_all_done(self, mock_blockers, mock_close):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.start_review()
+        mock_blockers.return_value = [
+            self._blocker("user", "closed"),
+            self._blocker("architect", "closed"),
+        ]
+        wd.finish_review_approve("https://github.com/test/repo/issues/99")
         self.assertEqual(wd.read_state()["phase"], "approved")
-        self.assertNotIn("mode", wd.read_state())
-
-    def test_feedback_returns_to_idle(self):
-        wd = self._make_wd()
-        wd.begin_task("1")
-        wd.begin_refactor("Work", "code")
-        wd.end_step("test commit")
-        wd.request_review()
-        self._submit_mock_reviews(wd)
-        wd.feedback()
-        state = wd.read_state()
-        self.assertEqual(state["phase"], "refactoring")
-        self.assertEqual(state["task"], "1")
+        mock_close.assert_called_once_with("https://github.com/test/repo/issues/99")
 
     @patch.object(WorkflowDev, "_write_issue_body")
-    @patch.object(WorkflowDev, "_read_issue_body")
-    def test_feedback_inserts_todos_above_steps(self, mock_read, mock_write):
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_feedback_transitions_to_refactoring_when_feedback_pending(self, mock_blockers, mock_write):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
-        self._submit_mock_reviews(wd)
-        mock_read.return_value = "Some text\n\n## Steps\n\n- [x] step one"
-        wd.feedback(items=["Fix this", "Fix that"])
+        wd.start_review()
+        # user responded with feedback (open, has body); architect approved (closed)
+        mock_blockers.return_value = [
+            self._blocker("user", "open", body="Findings here"),
+            self._blocker("architect", "closed"),
+        ]
+        wd.finish_review_feedback("https://github.com/test/repo/issues/99", "Findings here")
+        self.assertEqual(wd.read_state()["phase"], "refactoring")
         mock_write.assert_called_once()
-        body = mock_write.call_args[0][1]
-        self.assertIn("- [ ] Fix this", body)
-        self.assertIn("- [ ] Fix that", body)
-        steps_idx = body.index("## Steps")
-        todos_idx = body.index("- [ ] Fix this")
-        self.assertLess(todos_idx, steps_idx)
 
-    @patch.object(WorkflowDev, "_write_issue_body")
-    @patch.object(WorkflowDev, "_read_issue_body")
-    def test_feedback_without_items_skips_body_edit(self, mock_read, mock_write):
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_raises_when_role_has_no_blocker(self, mock_blockers, mock_close):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
-        self._submit_mock_reviews(wd)
-        wd.feedback()
-        mock_write.assert_not_called()
+        wd.start_review()
+        # user has a blocker; architect has none — corruption of start-review invariant
+        mock_blockers.return_value = [self._blocker("user", "closed")]
+        with self.assertRaises(RuntimeError) as ctx:
+            wd.finish_review_approve("https://github.com/test/repo/issues/99")
+        self.assertIn("reviewer:architect", str(ctx.exception))
 
-    def test_feedback_without_reviews_fails(self):
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_does_not_transition_when_role_in_progress(self, mock_blockers, mock_close):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
-        with self.assertRaises(ValueError) as ctx:
-            wd.feedback()
-        self.assertIn("missing reviews", str(ctx.exception))
+        wd.start_review()
+        # user done; architect still reviewing (open, empty body)
+        mock_blockers.return_value = [
+            self._blocker("user", "closed"),
+            self._blocker("architect", "open"),
+        ]
+        wd.finish_review_approve("https://github.com/test/repo/issues/99")
+        self.assertEqual(wd.read_state()["phase"], "review")
 
-    def test_approve_without_reviews_fails(self):
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_finish_review_does_not_transition_when_not_in_review(self, mock_blockers, mock_close):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
-        with self.assertRaises(ValueError) as ctx:
-            wd.approve()
-        self.assertIn("missing reviews", str(ctx.exception))
+        # Parent stays in refactoring (no start-review)
+        mock_blockers.return_value = [
+            self._blocker("user", "closed"),
+            self._blocker("architect", "closed"),
+        ]
+        wd.finish_review_approve("https://github.com/test/repo/issues/99")
+        self.assertEqual(wd.read_state()["phase"], "refactoring")
 
-    def test_end_task_after_review(self):
+    def test_finish_review_feedback_rejects_empty_findings(self):
         wd = self._make_wd()
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
-        self._submit_mock_reviews(wd)
-        wd.approve()
+        wd.start_review()
+        with self.assertRaises(ValueError):
+            wd.finish_review_feedback("https://github.com/test/repo/issues/99", "  ")
+
+    @patch.object(WorkflowDev, "close_issue")
+    @patch.object(WorkflowDev, "all_blockers")
+    def test_end_task_after_review(self, mock_blockers, mock_close):
+        wd = self._make_wd()
+        wd.begin_task("1")
+        wd.begin_refactor("Work", "code")
+        wd.end_step("test commit")
+        wd.start_review()
+        mock_blockers.return_value = [
+            self._blocker("user", "closed"),
+            self._blocker("architect", "closed"),
+        ]
+        wd.finish_review_approve("https://github.com/test/repo/issues/99")
         wd.end_task()
         self.assertEqual(wd.read_state()["phase"], "idle")
 
@@ -350,9 +390,7 @@ class StateTransitionTest(TestFixture):
         with self.assertRaises(ValueError):
             wd.begin_refactor("Work", "code")  # no task
         with self.assertRaises(ValueError):
-            wd.request_review()  # no task
-        with self.assertRaises(ValueError):
-            wd.approve()  # not in review
+            wd.start_review()  # no task
 
 
 class CheckEditTest(TestFixture):
@@ -409,7 +447,7 @@ class CheckEditTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         allowed, msg = wd.check_edit("workflow.py")
         self.assertFalse(allowed)
 
@@ -451,7 +489,7 @@ class CheckWriteTest(TestFixture):
         wd.begin_task("1")
         wd.begin_refactor("Work", "code")
         wd.end_step("test commit")
-        wd.request_review()
+        wd.start_review()
         allowed, _ = wd.check_write("new_file.py")
         self.assertFalse(allowed)
 

@@ -27,6 +27,9 @@ class Phase(Enum):
     IDLE = "idle"
     REFACTORING = "refactoring"
     MODIFYING = "modifying"
+    # REVIEW is a local cache of "review cycle in progress" on GH (any reviewer:*
+    # labeled blocker still in_progress). Set by start_review, cleared by
+    # _maybe_transition_after_review. Avoids a GH round-trip on every edit check.
     REVIEW = "review"
     APPROVED = "approved"
 
@@ -35,6 +38,13 @@ class StepMode(Enum):
     CODE = "code"
     TEST = "test"
     MODIFY = "modify"
+
+
+class ReviewStatus(Enum):
+    """Legal states for a reviewer's response in an active review cycle."""
+    IN_PROGRESS = "in_progress"  # issue open, empty body — reviewer still working
+    FEEDBACK = "feedback"        # issue open, body contains findings — reviewer done, findings outstanding
+    DONE = "done"                # issue closed — approved or feedback addressed
 
 
 # CLI command names
@@ -46,10 +56,9 @@ CMD_BEGIN_REFACTOR = "begin-refactor"
 CMD_BEGIN_MODIFY = "begin-modify"
 CMD_END_STEP = "end-step"
 CMD_ABORT_STEP = "abort-step"
-CMD_REQUEST_REVIEW = "request-review"
-CMD_SUBMIT_REVIEW = "submit-review"
-CMD_RESPOND_APPROVE = "respond-review/approve"
-CMD_RESPOND_FEEDBACK = "respond-review/feedback"
+CMD_START_REVIEW = "start-review"
+CMD_FINISH_REVIEW_APPROVE = "finish-review/approve"
+CMD_FINISH_REVIEW_FEEDBACK = "finish-review/feedback"
 CMD_CREATE_ISSUE = "create-issue"
 CMD_REOPEN_ISSUE = "reopen-issue"
 CMD_ADD_TO_PROJECT = "add-to-project"
@@ -117,9 +126,17 @@ class WorkflowDev(Workflow):
         "bash test/test.sh",
     )
 
+    # Regex patterns for read-only commands needing more precision than prefix match.
+    _BASH_REGEX = (
+        r'^gh api repos/[^/]+/[^/]+/issues/\d+/dependencies/blocked_by(\s|$)',
+    )
+
     def _is_whitelisted(self, command: str) -> bool:
         for prefix in self._BASH_READ_ONLY + self._BASH_WORKFLOW:
             if command.startswith(prefix):
+                return True
+        for pattern in self._BASH_REGEX:
+            if re.match(pattern, command):
                 return True
         return False
 
@@ -438,8 +455,12 @@ class WorkflowDev(Workflow):
             body = body.rstrip() + f"\n\n{rendered_section}\n"
         self._write_issue_body(issue_url, body)
 
-    def request_review(self) -> None:
-        """Request code review. Pushes branch, runs tests, checks CI."""
+    def start_review(self) -> dict[str, str]:
+        """Request code review. Pushes branch, runs tests, creates one review issue per role.
+
+        Returns a mapping {role: review_issue_url} so the caller (Dev Assistant)
+        can pass each URL to the corresponding reviewer subagent.
+        """
         self._require_task_idle("request-review")
         self._run_tests()
         # Push branch and check CI (skip if no remote)
@@ -458,68 +479,74 @@ class WorkflowDev(Workflow):
         state = self.read_state()
         self._write_state(Phase.REVIEW, state.get("task"))
         self._set_label(self.LABEL_REVIEW)
+        return {role: self._create_review_issue(role) for role in self.REVIEW_ROLES}
 
     REVIEW_ROLES = ("user", "architect")
 
-    def submit_review(self, role: str, review_issue_number: str) -> None:
-        """Submit a review by linking a review issue as a blocker."""
+    def _reviewer_label(self, role: str) -> str:
+        """Label used to mark a review issue with its reviewer role."""
+        return f"reviewer:{role}"
+
+    def _create_review_issue(self, role: str) -> str:
+        """Create a review issue for the active task and link as blocker. Returns issue URL."""
         if role not in self.REVIEW_ROLES:
             raise ValueError(f"Unknown review role: {role} (expected one of {self.REVIEW_ROLES})")
-        self._require_phase(Phase.REVIEW, "submit-review")
         task_url = self._issue_url_from_state()
         if not task_url:
-            raise ValueError("No issue URL in state")
-        repo = self.get_repo()
-        review_url = f"https://github.com/{repo}/issues/{review_issue_number}"
+            raise ValueError("No active task; cannot create review issue.")
+        task_number = task_url.rsplit("/", 1)[-1]
+        title = f"{role} review of #{task_number}"
+        review_url = self.create_issue(title, "")
+        self.add_label(review_url, self._reviewer_label(role))
         self.add_blocker(task_url, review_url)
-        # Record in state
-        sf = self._read_state_file()
-        reviews = sf["stack"][-1].get("reviews_submitted", [])
-        if role not in reviews:
-            reviews.append(role)
-        sf["stack"][-1]["reviews_submitted"] = reviews
-        self._save_stack(sf["stack"], history=sf["history"])
+        return review_url
 
-    def _missing_reviews(self) -> list[str]:
-        """Return list of review roles not yet submitted."""
-        state = self.read_state()
-        submitted = state.get("reviews_submitted", [])
-        return [r for r in self.REVIEW_ROLES if r not in submitted]
+    def finish_review_approve(self, review_url: str) -> None:
+        """Reviewer-facing: close a review issue with no findings."""
+        self.close_issue(review_url)
+        self._maybe_transition_after_review()
 
-    def _complete_review(self, command: str, target_phase: Phase = Phase.REFACTORING) -> None:
-        """Shared logic for approve/feedback: validate phase, check reviews, transition."""
-        self._require_phase(Phase.REVIEW, command)
-        missing = self._missing_reviews()
-        if missing:
-            raise ValueError(
-                f"Cannot {command}: missing reviews from {', '.join(missing)}. "
-                f"Use `submit-review <role> <content>` first."
-            )
-        state = self.read_state()
-        self._write_state(target_phase, state.get("task"))
-        self._set_label(self.LABEL_IDLE)
+    def finish_review_feedback(self, review_url: str, findings: str) -> None:
+        """Reviewer-facing: record findings on a review issue; leave open until addressed."""
+        if not findings.strip():
+            raise ValueError("Feedback requires non-empty findings text.")
+        self._write_issue_body(review_url, findings)
+        self._maybe_transition_after_review()
 
-    def approve(self) -> None:
-        """Approve review; transition to approved. Requires both reviews submitted."""
-        self._complete_review("respond-review/approve", Phase.APPROVED)
-        self._commit_state("state: approved")
-
-    def feedback(self, items: list[str] | None = None) -> None:
-        """Review feedback; return to idle. Requires reviews to have been submitted."""
-        self._complete_review("respond-review/feedback")
-        if items:
-            issue_url = self._issue_url_from_state()
-            if issue_url:
-                # Insert feedback todos ABOVE the Steps section
-                body = self._read_issue_body(issue_url)
-                new_items = "\n".join(f"- [ ] {item}" for item in items)
-                section = "## Steps"
-                if section in body:
-                    idx = body.index(section)
-                    body = body[:idx] + new_items + "\n\n" + body[idx:]
-                else:
-                    body = f"{body}\n{new_items}" if body else new_items
-                self._write_issue_body(issue_url, body)
+    def _maybe_transition_after_review(self) -> None:
+        """Transition parent state once every reviewer has given a verdict."""
+        if self._read_phase() != Phase.REVIEW:
+            return
+        task_url = self._issue_url_from_state()
+        assert task_url
+        blockers = self.all_blockers(task_url)
+        status: dict[str, ReviewStatus] = {}
+        for role in self.REVIEW_ROLES:
+            matching = [b for b in blockers if self._reviewer_label(role) in b.get("labels", [])]
+            if not matching:
+                raise RuntimeError(
+                    f"Review cycle corrupt: no blocker with label "
+                    f"'{self._reviewer_label(role)}' on {task_url}. "
+                    f"Expected start-review to have created one."
+                )
+            blocker = matching[0]
+            if blocker.get("state") == "closed":
+                status[role] = ReviewStatus.DONE
+            elif blocker.get("body", "").strip():
+                status[role] = ReviewStatus.FEEDBACK
+            else:
+                status[role] = ReviewStatus.IN_PROGRESS
+        # Transition only when every reviewer has given a verdict.
+        if all(s is not ReviewStatus.IN_PROGRESS for s in status.values()):
+            state = self.read_state()
+            if all(s is ReviewStatus.DONE for s in status.values()):
+                self._write_state(Phase.APPROVED, state.get("task"))
+                self._set_label(self.LABEL_IDLE)
+                self._commit_state("state: approved (auto from review)")
+            else:
+                self._write_state(Phase.REFACTORING, state.get("task"))
+                self._set_label(self.LABEL_IDLE)
+                self._commit_state("state: refactoring (auto from review)")
 
     def end_task(self) -> None:
         """Complete the current task. Requires approved review."""
@@ -674,9 +701,32 @@ class WorkflowDev(Workflow):
             return True, ""
         return self.check_file_access(rel_path)
 
-    def check_bash(self, command: str) -> tuple[bool, str]:
-        """Gate shell commands: whitelist read-only and workflow commands; gate rm via check_file_access."""
+    REVIEWER_AGENTS = ("user-reviewer", "architect-reviewer")
+    _FINISH_REVIEW_PREFIX = "python3 src/workflow_dev/workflow.py finish-review/"
+
+    def check_bash(self, command: str, agent_type: str | None = None) -> tuple[bool, str]:
+        """Gate shell commands by caller.
+
+        Reviewer subagents: read-only commands + finish-review/* only.
+        Dev Assistant (no agent_type): existing whitelist; finish-review/* is blocked.
+        """
         cmd = command.strip()
+        if agent_type in self.REVIEWER_AGENTS:
+            if cmd.startswith(self._FINISH_REVIEW_PREFIX):
+                return True, ""
+            for prefix in self._BASH_READ_ONLY:
+                if cmd.startswith(prefix):
+                    return True, ""
+            for pattern in self._BASH_REGEX:
+                if re.match(pattern, cmd):
+                    return True, ""
+            return False, (
+                f"Reviewer ({agent_type}) may only read code and call "
+                f"finish-review/{{approve,feedback}}. Blocked: {command[:80]}"
+            )
+        # Main agent (Dev Assistant): finish-review/* is reviewer-only
+        if cmd.startswith(self._FINISH_REVIEW_PREFIX):
+            return False, "finish-review/* is for reviewer subagents only."
         if self._is_whitelisted(cmd):
             return True, ""
         if cmd.startswith("rm "):
@@ -842,29 +892,28 @@ def main() -> None:
         reason = sys.argv[2] if len(sys.argv) > 2 else ""
         wd.abort_step(reason)
         print(f"Step aborted; back to idle" + (f" ({reason})" if reason else ""))
-    elif command == CMD_REQUEST_REVIEW:
-        wd.request_review()
-        print("Review requested; edits blocked. Invoke /code-review now.")
-    elif command == CMD_RESPOND_APPROVE:
-        wd.approve()
-        print("Review approved; back to idle")
-    elif command == CMD_RESPOND_FEEDBACK:
-        items = sys.argv[2:] if len(sys.argv) > 2 else None
-        wd.feedback(items)
-        msg = "Review feedback; back to idle"
-        if items:
-            msg += f" · {len(items)} todo(s) added to issue"
-        print(msg)
+    elif command == CMD_START_REVIEW:
+        urls = wd.start_review()
+        print("Review requested; edits blocked. Spawn each reviewer with their URL:")
+        for role, url in urls.items():
+            print(f"  {role}: {url}")
     elif command == CMD_END_TASK:
         wd.end_task()
         print("Task complete; issue closed")
-    elif command == CMD_SUBMIT_REVIEW:
+    elif command == CMD_FINISH_REVIEW_APPROVE:
+        args = sys.argv[2:]
+        if len(args) < 1:
+            print(f"Usage: workflow.py {CMD_FINISH_REVIEW_APPROVE} <review-url>", file=sys.stderr)
+            sys.exit(1)
+        wd.finish_review_approve(args[0])
+        print("Review approved (issue closed)")
+    elif command == CMD_FINISH_REVIEW_FEEDBACK:
         args = sys.argv[2:]
         if len(args) < 2:
-            print(f"Usage: workflow.py {CMD_SUBMIT_REVIEW} <user|architect> <review-issue-number>", file=sys.stderr)
+            print(f"Usage: workflow.py {CMD_FINISH_REVIEW_FEEDBACK} <review-url> <findings>", file=sys.stderr)
             sys.exit(1)
-        wd.submit_review(args[0], args[1])
-        print(f"Review submitted: {args[0]} (#{args[1]} added as blocker)")
+        wd.finish_review_feedback(args[0], args[1])
+        print("Feedback recorded; issue left open until findings addressed")
     elif command == CMD_CREATE_ISSUE:
         args = sys.argv[2:]
         if len(args) < 2:

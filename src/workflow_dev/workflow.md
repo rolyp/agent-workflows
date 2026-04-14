@@ -9,10 +9,10 @@ Follow whenever working on the agent-workflows submodule. See [GitHub Issues](ht
 | **Developer** | — | — | Human; reviews, approves, directs |
 | **Dev Assistant** | [`dev-assistant`](skills/dev-assistant/SKILL.md) (background) | Always active | Drives implementation; orchestrates other skills |
 | **Tester** | [`/tester`](skills/tester/SKILL.md) | Inline or subagent | Runs and writes tests for workflow code |
-| **User Reviewer** | [`user-review`](skills/user-review/SKILL.md) | Subagent at `request-review` | Expert user; reviews for workflow robustness, transparency, fitness for purpose |
-| **Architect Reviewer** | [`architect-review`](skills/architect-review/SKILL.md) | Subagent at `request-review` | Expert architect; reviews for design integrity, clear responsibilities, invariant enforcement |
+| **User Reviewer** | [`user-reviewer`](../../.claude/agents/user-reviewer.md) | Subagent at `start-review` | Expert user; reviews for workflow robustness, transparency, fitness for purpose |
+| **Architect Reviewer** | [`architect-reviewer`](../../.claude/agents/architect-reviewer.md) | Subagent at `start-review` | Expert architect; reviews for design integrity, clear responsibilities, invariant enforcement |
 
-Both reviewers run as subagents in **separate context** (fresh perspective, no shared development biases). Invoked in parallel at `request-review`.
+Both reviewers run as subagents in **separate context** (fresh perspective, no shared development biases). Invoked in parallel at `start-review`.
 
 ---
 
@@ -34,9 +34,9 @@ Both reviewers run as subagents in **separate context** (fresh perspective, no s
 - When running from the submodule directly: all files are in scope
 
 ### Testing and CI
-- `test.sh` runs mypy + pytest; used by `end-step` and `request-review` gates
+- `test.sh` runs mypy + pytest; used by `end-step` and `start-review` gates
 - Post-push hook records pending CI run ID in `state.json`
-- `request-review` blocks until pending CI run completes; fails if CI is red
+- `start-review` blocks until pending CI run completes; fails if CI is red
 - `settings.local.json` env vars (including `GH_TOKEN`) are available to hooks and workflow commands but not to Bash tool calls or background tasks
 
 ### Priorities
@@ -76,7 +76,7 @@ no task ──begin-task──► idle (root frame, edits locked)
                    │
               (at root = idle)
                    │
-              request-review (tests + CI must pass)
+              start-review (tests + CI must pass)
                    │
                    ▼
               review (all locked)
@@ -133,7 +133,7 @@ Notes:
 | `end-step <commit-message>` | Pop frame; commit; check off todo | Tests must pass |
 | `abort-step [reason]` | Pop frame without tests; todo left unchecked | — |
 | `suspend-task` | Park task; switch to main | Idle; clean tree |
-| `request-review` | Enter review | Idle; tests + CI pass |
+| `start-review` | Enter review | Idle; tests + CI pass |
 | `submit-review <role> <issue#>` | Link review issue as blocker | In review |
 | `respond-review/approve` | Transition to approved | In review; all reviews submitted |
 | `respond-review/feedback` | Return to idle | In review; all reviews submitted |
@@ -166,7 +166,7 @@ When `end-step` fails (tests don't pass):
 - Fix with `begin-modify`; remove decorator
 
 ### Review
-- `request-review` from idle; spawns **User Reviewer** and **Architect Reviewer** as parallel subagents in separate context
+- `start-review` from idle; spawns **User Reviewer** and **Architect Reviewer** as parallel subagents in separate context
 - Both reviewers create review issues with findings as checklists
 - `submit-review <role> <issue-number>` links review issue as blocker
 - `respond-review/approve` transitions to approved; `respond-review/feedback` returns to idle
@@ -174,7 +174,7 @@ When `end-step` fails (tests don't pass):
 
 ### Review-finding tasks
 - Tasks that work through review findings (e.g. address a user review issue) exit via `approve-task` — no nested review needed
-- Do not call `request-review`; use `approve-task` (developer approval) then `end-task`
+- Do not call `start-review`; use `approve-task` (developer approval) then `end-task`
 - `approve-task` accepts both refactoring and review phase for this reason
 
 ### GitHub integration
@@ -190,5 +190,5 @@ When `end-step` fails (tests don't pass):
 - `GH_TOKEN` / `GH_PROJECT_TOKEN` in `.claude/settings.local.json` (gitignored)
 - Hooks gate all tool calls: `pre_edit.py`, `pre_write.py`, `pre_bash.py` (protects state.json)
 - `prepare-commit-msg` git hook auto-tags commits with current mode (e.g. `[refactor/code]`)
-- `post_push.py` records CI run ID; `request-review` blocks until CI passes
+- `post_push.py` records CI run ID; `start-review` blocks until CI passes
 - `state.json` is the local pushdown automaton; GitHub labels + project status are the external view

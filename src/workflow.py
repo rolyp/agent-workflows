@@ -421,6 +421,19 @@ class Workflow(ABC):
             raise RuntimeError(f"Failed to check blockers: {result.stderr}")
         return json.loads(result.stdout) if result.stdout.strip() else []
 
+    def all_blockers(self, issue_url: str) -> list[dict]:
+        """Return all (open + closed) issues that block this issue. Each entry includes state, body, labels."""
+        owner, repo_name, number = self._parse_issue_url(issue_url)
+        env = self._gh_env()
+        result = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo_name}/issues/{number}/dependencies/blocked_by",
+             "--jq", '[.[] | {number, title, url: .html_url, state, body, labels: [.labels[].name]}]'],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to check blockers: {result.stderr}")
+        return json.loads(result.stdout) if result.stdout.strip() else []
+
     # --- Issue label management ---
 
     # Subclasses must define their own labels and WORKFLOW_LABELS tuple.
@@ -655,9 +668,9 @@ class Workflow(ABC):
         """Check whether a Write to file_path is allowed."""
 
     @abstractmethod
-    def check_bash(self, command: str) -> tuple[bool, str]:
+    def check_bash(self, command: str, agent_type: str | None = None) -> tuple[bool, str]:
         """Check whether a Bash command is allowed.
 
-        Returns (allowed, message). If not allowed, message explains
-        what is blocked and why.
+        agent_type: name of the calling subagent (from Claude Code hook input),
+        or None for the main agent. Subclasses may route differently per caller.
         """
