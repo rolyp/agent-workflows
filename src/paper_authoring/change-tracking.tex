@@ -3,12 +3,19 @@
 % Note: does NOT require soul/\sout — deleted text is greyed out, not struck through.
 % This allows \deleted and \replaced to work across paragraph boundaries.
 
-% Inline change markup
-\definecolor{addedcolor}{RGB}{0,160,0}
-\definecolor{deletedcolor}{RGB}{180,180,180}
-\newcommand{\added}[1]{\textcolor{addedcolor}{#1}}
-\newcommand{\deleted}[1]{\textcolor{deletedcolor}{#1}}
-\newcommand{\replaced}[2]{\textcolor{deletedcolor}{#2}\textcolor{addedcolor}{#1}}
+% Inline change markup. Define \acceptchanges before loading to accept all changes
+% (render added text plainly, drop deleted text).
+\ifdefined\acceptchanges
+  \newcommand{\added}[1]{#1}
+  \newcommand{\deleted}[1]{}
+  \newcommand{\replaced}[2]{#1}
+\else
+  \definecolor{addedcolor}{RGB}{0,160,0}
+  \definecolor{deletedcolor}{RGB}{180,180,180}
+  \newcommand{\added}[1]{\textcolor{addedcolor}{#1}}
+  \newcommand{\deleted}[1]{\textcolor{deletedcolor}{#1}}
+  \newcommand{\replaced}[2]{\textcolor{deletedcolor}{#2}\textcolor{addedcolor}{#1}}
+\fi
 
 % Change bars for human review — red: proposed edit; blue: task selection.
 % Workaround: changebar's \end@dblfloat redefinition breaks labels in table* floats.
